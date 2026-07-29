@@ -1,17 +1,16 @@
 package dev.aetex.project
 
-import java.io.File
+import java.nio.file.Path
 import javax.swing.JFileChooser
 
-fun chooseProjectDirectory(): File? {
-    val chooser = JFileChooser()
+fun chooseProjectDirectory(): Path? {
+    val chooser = JFileChooser().apply {
+        fileSelectionMode = JFileChooser.DIRECTORIES_ONLY
+        dialogTitle = "Open LaTeX project"
+    }
 
-    chooser.fileSelectionMode = JFileChooser.DIRECTORIES_ONLY
-
-    val result = chooser.showOpenDialog(null)
-
-    return if (result == JFileChooser.APPROVE_OPTION) {
-        chooser.selectedFile
+    return if (chooser.showOpenDialog(null) == JFileChooser.APPROVE_OPTION) {
+        chooser.selectedFile.toPath()
     } else {
         null
     }
