@@ -7,7 +7,7 @@ plugins {
 }
 
 group = "dev.aetex"
-version = "1.0.0"
+version = "1.0.0-SNAPSHOT"
 
 repositories {
     google()
