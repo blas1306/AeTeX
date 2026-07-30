@@ -4,6 +4,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import dev.aetex.compilation.BuildFailure
+import dev.aetex.compilation.BuildFailureKind
+import dev.aetex.compilation.BuildRequestResult
+import dev.aetex.compilation.BuildSessionId
+import dev.aetex.compilation.BuildSessionSnapshot
+import dev.aetex.compilation.CancellationOrigin
+import dev.aetex.compilation.CancellationRequestResult
+import dev.aetex.compilation.CompilationManager
+import dev.aetex.compilation.RuntimeStorageException
 import dev.aetex.editor.DocumentError
 import dev.aetex.editor.DocumentResult
 import dev.aetex.editor.DocumentService
@@ -16,6 +25,10 @@ import dev.aetex.project.TeXProject
 import dev.aetex.project.configuration.ProjectConfigurationDiagnostic
 import dev.aetex.project.configuration.ProjectConfigurationDiagnosticSeverity
 import java.nio.file.Path
+import java.util.Collections
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.TimeUnit
 import java.util.logging.Level
 import java.util.logging.Logger
 
@@ -26,12 +39,15 @@ data class UiMessage(
 
 class AeTeXState(
     private val projectLoader: ProjectLoader = ProjectLoader(),
-    private val documentServiceFactory: (Path) -> DocumentService = ::DocumentService
+    private val documentServiceFactory: (Path) -> DocumentService = ::DocumentService,
+    private val compilationManagerFactory: () -> CompilationManager = ::CompilationManager
 ) {
     var project: TeXProject? by mutableStateOf(null)
         private set
 
-    val openDocuments = mutableStateListOf<OpenDocument>()
+    private val mutableOpenDocuments = mutableStateListOf<OpenDocument>()
+    val openDocuments: List<OpenDocument> =
+        Collections.unmodifiableList(mutableOpenDocuments)
 
     var activeDocumentPath: Path? by mutableStateOf(null)
         private set
@@ -47,6 +63,8 @@ class AeTeXState(
         private set
 
     private var documentService: DocumentService? = null
+    private var compilationManager: CompilationManager? = null
+    private val retiringCompilationManagers = CopyOnWriteArrayList<CompletableFuture<Void>>()
 
     val activeDocument: OpenDocument?
         get() = activeDocumentPath?.let { activePath ->
@@ -69,11 +87,13 @@ class AeTeXState(
             val loadResult = projectLoader.load(rootDirectory)
             val service = documentServiceFactory(loadResult.project.rootDirectory)
 
+            compilationManager?.let(::retireCompilationManager)
+            compilationManager = null
             project = loadResult.project
             projectScanIssues = loadResult.scanIssues
             configurationDiagnostics = loadResult.project.configurationDiagnostics
             documentService = service
-            openDocuments.clear()
+            mutableOpenDocuments.clear()
             activeDocumentPath = null
             loadResult.scanIssues.forEach { issue ->
                 LOGGER.log(
@@ -134,7 +154,7 @@ class AeTeXState(
 
         return when (val result = service.open(normalizedPath)) {
             is DocumentResult.Success -> {
-                openDocuments += result.value
+                mutableOpenDocuments += result.value
                 activeDocumentPath = result.value.path
                 message = null
                 true
@@ -158,7 +178,7 @@ class AeTeXState(
         val normalizedPath = path.toAbsolutePath().normalize()
         val index = openDocuments.indexOfFirst { it.path == normalizedPath }
         if (index >= 0 && openDocuments[index].content != content) {
-            openDocuments[index] = openDocuments[index].withContent(content)
+            mutableOpenDocuments[index] = openDocuments[index].withContent(content)
         }
     }
 
@@ -186,7 +206,7 @@ class AeTeXState(
 
         return when (val result = service.save(openDocuments[index])) {
             is DocumentResult.Success -> {
-                openDocuments[index] = result.value
+                mutableOpenDocuments[index] = result.value
                 message = UiMessage(
                     text = "Saved ${result.value.path.fileName}.",
                     isError = false
@@ -195,7 +215,7 @@ class AeTeXState(
             }
 
             is DocumentResult.Failure -> {
-                openDocuments[index] = openDocuments[index].copy(error = result.error)
+                mutableOpenDocuments[index] = openDocuments[index].copy(error = result.error)
                 reportDocumentError(result.error)
                 false
             }
@@ -210,6 +230,55 @@ class AeTeXState(
             }
         }
         return true
+    }
+
+    fun requestBuild(): BuildRequestResult {
+        val currentProject = project ?: return BuildRequestResult.Rejected(
+            BuildFailure(
+                BuildFailureKind.INVALID_CONFIGURATION,
+                "Open a project before requesting compilation."
+            )
+        )
+        val manager = compilationManager ?: try {
+            compilationManagerFactory().also {
+                compilationManager = it
+            }
+        } catch (error: RuntimeStorageException) {
+            return BuildRequestResult.Rejected(error.failure)
+        } catch (error: Exception) {
+            return BuildRequestResult.Rejected(
+                BuildFailure(
+                    BuildFailureKind.INTERNAL_ERROR,
+                    "The compilation manager could not be initialized.",
+                    technicalCause = dev.aetex.compilation.TechnicalCause.from(error)
+                )
+            )
+        }
+        return manager.requestBuild(currentProject)
+    }
+
+    fun cancelBuild(
+        sessionId: BuildSessionId,
+        origin: CancellationOrigin = CancellationOrigin.USER
+    ): CancellationRequestResult =
+        compilationManager?.cancel(sessionId, origin)
+            ?: CancellationRequestResult.UnknownSession
+
+    fun observeBuild(sessionId: BuildSessionId): BuildSessionSnapshot? =
+        compilationManager?.observeSession(sessionId)
+
+    fun shutdown() {
+        val manager = compilationManager
+        compilationManager = null
+        manager?.close()
+        retiringCompilationManagers.toList().forEach {
+            try {
+                it.get(10, TimeUnit.SECONDS)
+            } catch (_: Exception) {
+                // Each retired manager already preserves a durable lease if cleanup is incomplete.
+            }
+        }
+        retiringCompilationManagers.clear()
     }
 
     fun closeDocument(path: Path): Boolean {
@@ -237,7 +306,7 @@ class AeTeXState(
         }
 
         val wasActive = activeDocumentPath == normalizedPath
-        openDocuments.removeAt(index)
+        mutableOpenDocuments.removeAt(index)
         if (wasActive) {
             activeDocumentPath = openDocuments.getOrNull(index)?.path
                 ?: openDocuments.getOrNull(index - 1)?.path
@@ -296,6 +365,21 @@ class AeTeXState(
         val outputDirectory =
             currentProject.effectiveConfiguration.outputDirectory?.value ?: return false
         return path.startsWith(outputDirectory)
+    }
+
+    private fun retireCompilationManager(manager: CompilationManager) {
+        val completion = CompletableFuture<Void>()
+        retiringCompilationManagers += completion
+        Thread.startVirtualThread {
+            try {
+                manager.close()
+                completion.complete(null)
+            } catch (error: Throwable) {
+                completion.completeExceptionally(error)
+            } finally {
+                retiringCompilationManagers -= completion
+            }
+        }
     }
 
     companion object {

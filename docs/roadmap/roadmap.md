@@ -80,7 +80,7 @@ directive, then applies project-root confinement.
 
 ## Milestone 2 — Compilation
 
-**Status:** Architecture defined and accepted; implementation pending.
+**Status:** Core compilation system implemented.
 
 **Objective:** Compile the configured project through observable local tools without blocking the UI.
 
@@ -103,6 +103,37 @@ validation, security, and portability. The
 historical analysis.
 
 **Exit criteria:** A configured project can be built, cancelled, and rebuilt while the editor remains responsive; success and failure are represented explicitly; users can inspect the executed command and full log; automated tests cover process results and failure modes.
+
+The implemented core:
+
+- consumes only a ready `EffectiveProjectConfiguration` and its owning resolved
+  project root;
+- creates immutable, fingerprinted `BuildPlan` snapshots with exact discovered
+  tools, structured `latexmk` arguments, sanitized environment, charset, output
+  identity, and expected artifacts;
+- discovers `latexmk` and the exact configured engine from a validated `PATH`
+  without a shell or fallback;
+- executes builds asynchronously through `ProcessBuilder`, drains stdout and
+  stderr independently, and retains raw file-backed logs under a finite quota;
+- models queued, running, cancelling, succeeded, failed, and cancelled sessions
+  with verified transitions and one immutable terminal result;
+- serializes globally identical output spaces, keeps only the latest queued
+  replacement, and permits isolated outputs to run concurrently;
+- applies bounded graceful and forced process-tree cancellation while retaining
+  the output lease until termination and stream cleanup are proven;
+- revalidates main and output paths immediately before execution, creates
+  confined output directories segment by segment, and requires the exact
+  configured-main PDF even after a zero exit;
+- persists leases and quarantine records in application-owned storage outside
+  the project, restores leases that reached process startup as quarantine,
+  discards only reservations that durably prove startup never began, and
+  permits release only after process and path revalidation;
+- extracts conservative typed diagnostics without replacing raw evidence;
+- exposes a small compilation entry point from application state without
+  placing process mechanics in Compose state.
+
+Preview, SyncTeX, watch mode, auto-build, cleaning, multiple targets, remote
+execution, caching, and compilation UI remain outside this milestone.
 
 ## Milestone 3 — PDF preview
 

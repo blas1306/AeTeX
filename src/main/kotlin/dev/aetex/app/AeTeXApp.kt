@@ -12,6 +12,19 @@ import dev.aetex.ui.UnsavedChangesDialog
 fun startAeTeX() = application {
     val state = remember { AeTeXState() }
     var confirmApplicationClose by remember { mutableStateOf(false) }
+    var shutdownStarted by remember { mutableStateOf(false) }
+    val closeApplication = {
+        if (!shutdownStarted) {
+            shutdownStarted = true
+            Thread.startVirtualThread {
+                try {
+                    state.shutdown()
+                } finally {
+                    exitApplication()
+                }
+            }
+        }
+    }
 
     val title = buildString {
         append("AeTeX")
@@ -27,7 +40,7 @@ fun startAeTeX() = application {
     Window(
         onCloseRequest = {
             if (state.modifiedDocuments.isEmpty()) {
-                exitApplication()
+                closeApplication()
             } else {
                 confirmApplicationClose = true
             }
@@ -42,12 +55,12 @@ fun startAeTeX() = application {
                 message = "Save all modified documents before closing AeTeX?",
                 onSave = {
                     if (state.saveAllModifiedDocuments()) {
-                        exitApplication()
+                        closeApplication()
                     } else {
                         confirmApplicationClose = false
                     }
                 },
-                onDiscard = ::exitApplication,
+                onDiscard = closeApplication,
                 onCancel = { confirmApplicationClose = false }
             )
         }
