@@ -362,3 +362,58 @@ Interactive main confirmation and configuration writing remain future UI work.
 - [`TeXProject.kt`](../../src/main/kotlin/dev/aetex/project/TeXProject.kt)
 - [`ProjectLoader.kt`](../../src/main/kotlin/dev/aetex/project/ProjectLoader.kt)
 - [`ProjectConfigurationLoader.kt`](../../src/main/kotlin/dev/aetex/project/configuration/ProjectConfigurationLoader.kt)
+
+## ADR-0012 — Adopt a deterministic, shell-free compilation system
+
+- **Date:** 2026-07-29
+- **Status:** Accepted
+
+### Context
+
+The implemented project-configuration system now provides the confirmed main
+document, engine, strategy, and output required for compilation. Compilation
+adds external process execution, cancellation, concurrent stream capture,
+generated-file ownership, diagnostics, and future Preview and SyncTeX
+association. Architecture Study 003 established the accepted direction for
+those responsibilities.
+
+### Decision
+
+Compilation consumes only a ready `EffectiveProjectConfiguration` and converts
+it into an immutable `BuildPlan`. A `CompilationManager` owns sessions,
+cancellation, latest-request replacement, and one active compilation per output
+space. Each `BuildSession` executes its plan through `ProcessBuilder` without a
+shell and produces one typed `BuildResult`.
+
+Keep `TeXEngine` and `CompilationStrategy` separate. Schema 1 uses `latexmk` as
+its only strategy and never falls back to direct engine execution. Preserve
+complete logs, derive typed diagnostics without replacing raw evidence,
+revalidate shared output before execution, and never clean it recursively as
+part of an ordinary build.
+
+### Reasons
+
+Immutable plans make in-flight work attributable and deterministic. Output
+serialization prevents concurrent corruption while latest-request replacement
+avoids stale queues. Shell-free structured execution reduces quoting and
+injection risk, and complete evidence makes process, tool, and parsing failures
+inspectable across supported platforms.
+
+### Consequences
+
+Compilation implementation must introduce explicit plan, session, process,
+result, state, discovery, logging, and diagnostic boundaries. Missing tools,
+unsupported typed values, process failures, cancellation, incomplete cleanup,
+and invalid artifacts remain recoverable results rather than hidden fallback.
+Preview and SyncTeX must consume session results instead of guessing output
+identity.
+
+Custom commands, direct-engine strategies, automatic builds, parallel targets,
+cleaning, caching, and remote compilation require later architecture work.
+
+### References
+
+- [AeTeX Architecture 003](../architecture/003-compilation-system.md)
+- [Architecture Study 003](../architecture/003-compilation-system-study.md)
+- [AeTeX Architecture 002](../architecture/002-project-configuration-system.md)
+- [Roadmap](../roadmap/roadmap.md)

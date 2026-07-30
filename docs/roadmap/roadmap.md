@@ -80,9 +80,11 @@ directive, then applies project-root confinement.
 
 ## Milestone 2 — Compilation
 
+**Status:** Architecture defined and accepted; implementation pending.
+
 **Objective:** Compile the configured project through observable local tools without blocking the UI.
 
-Candidate capabilities:
+Required capabilities:
 
 - detection and reporting of available TeX tools;
 - asynchronous build execution;
@@ -90,9 +92,15 @@ Candidate capabilities:
 - captured standard output, standard error, command, exit status, and duration;
 - a stable build-result model;
 - complete logs plus initial extraction and navigation of source diagnostics;
-- `latexmk` as the first integrated strategy;
-- a controlled fallback or user-configurable command where appropriate;
+- `latexmk` as the only schema 1 strategy, without silent direct-engine fallback;
 - clear behavior for missing executables, invalid configuration, timeouts, and failed cancellation.
+
+The normative [compilation-system architecture](../architecture/003-compilation-system.md)
+defines build planning, sessions, state transitions, tool discovery, shell-free
+process execution, concurrency, cancellation, logs, diagnostics, output
+validation, security, and portability. The
+[compilation study](../architecture/003-compilation-system-study.md) remains
+historical analysis.
 
 **Exit criteria:** A configured project can be built, cancelled, and rebuilt while the editor remains responsive; success and failure are represented explicitly; users can inspect the executed command and full log; automated tests cover process results and failure modes.
 
