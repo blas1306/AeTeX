@@ -41,7 +41,7 @@ class ProjectScannerTest {
 
     @Test
     fun `ignores build and metadata directories`() {
-        listOf(".git", ".gradle", "build", "out").forEach { name ->
+        listOf(".aetex", ".git", ".gradle", "build", "out").forEach { name ->
             temporaryDirectory.resolve(name).createDirectory()
                 .resolve("ignored.tex").writeText("ignored")
         }

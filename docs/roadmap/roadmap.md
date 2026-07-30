@@ -33,6 +33,10 @@ The implemented baseline includes:
 
 ## Milestone 1 — Project configuration
 
+**Status:** Configuration loading, validation, effective defaults, and
+non-interactive main-document resolution implemented. Interactive confirmation
+and configuration writing remain pending.
+
 **Objective:** Persist the minimum project intent needed to identify a build target and prepare compilation without relying on hidden heuristics.
 
 Required capabilities:
@@ -50,6 +54,29 @@ Required capabilities:
 The normative [project configuration architecture](../architecture/002-project-configuration-system.md) defines the file location, TOML schema, defaults, discovery rules, and compatibility behavior that implementation must follow.
 
 **Exit criteria:** A project can be reopened with a validated root document and build-relevant settings; an unconfigured or invalid project has an explicit recoverable state; tests cover configuration loading, defaults, validation, and schema compatibility.
+
+The implemented infrastructure:
+
+- reads only `.aetex/project.toml` through a TOML 1.0 parser;
+- distinguishes absent, loaded, invalid, and unsupported configurations;
+- validates schema 1 enums and confined project-relative paths;
+- resolves explicit, provisional, ambiguous, unavailable, and invalid-main states;
+- applies engine, strategy, and output defaults without writing them;
+- excludes `.aetex` and the effective output directory from project documents;
+- keeps invalid and unconfigured projects editable while exposing structured
+  diagnostics.
+
+TomlJ `1.1.1` is the only new runtime dependency. It is a focused TOML 1.0
+parser available from Maven Central and provides typed values plus syntax
+positions without introducing a serialization framework.
+
+Current limitations are intentional: AeTeX does not yet write configuration or
+provide the interactive confirmation/selection flow. Unknown parsed field
+values are retained in memory, but comment and formatting round-trip is not
+implemented because there is no writer in this milestone. Architecture 002 does
+not specify the base directory for `% !TEX root` paths; AeTeX follows the
+directive convention of resolving them relative to the file that declares the
+directive, then applies project-root confinement.
 
 ## Milestone 2 — Compilation
 

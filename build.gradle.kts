@@ -18,6 +18,7 @@ repositories {
 dependencies {
     implementation(compose.desktop.currentOs)
     implementation(compose.material3)
+    implementation("org.tomlj:tomlj:1.1.1")
 
     testImplementation(kotlin("test"))
 }

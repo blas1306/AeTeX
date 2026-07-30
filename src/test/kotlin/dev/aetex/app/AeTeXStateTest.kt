@@ -1,6 +1,8 @@
 package dev.aetex.app
 
 import dev.aetex.editor.OpenDocument
+import dev.aetex.project.configuration.PersistedConfigurationStatus
+import dev.aetex.project.configuration.ProjectConfigurationDiagnosticCode
 import java.nio.file.Path
 import kotlin.io.path.createDirectory
 import kotlin.io.path.readText
@@ -92,6 +94,46 @@ class AeTeXStateTest {
         assertTrue(state.activeDocument?.isModified == true)
 
         state.discardAndCloseDocument(file)
+        assertTrue(state.openDocuments.isEmpty())
+    }
+
+    @Test
+    fun `keeps editing available when project configuration is corrupt`() {
+        val file = temporaryDirectory.resolve("main.tex")
+        file.writeText("original")
+        temporaryDirectory.resolve(".aetex").createDirectory()
+            .resolve("project.toml").writeText("schema = [")
+        val state = AeTeXState()
+
+        assertTrue(state.openProject(temporaryDirectory))
+        assertEquals(
+            PersistedConfigurationStatus.INVALID,
+            state.project?.effectiveConfiguration?.persistedStatus
+        )
+        assertTrue(
+            state.configurationDiagnostics.any {
+                it.code == ProjectConfigurationDiagnosticCode.INVALID_TOML
+            }
+        )
+        assertTrue(state.openDocument(file))
+        state.updateDocument(file, "changed")
+        assertTrue(state.saveActiveDocument())
+        assertEquals("changed", file.readText())
+    }
+
+    @Test
+    fun `does not open configured output as an editable document`() {
+        val outputFile = temporaryDirectory.resolve("generated").createDirectory()
+            .resolve("result.tex")
+        outputFile.writeText("generated")
+        temporaryDirectory.resolve(".aetex").createDirectory()
+            .resolve("project.toml").writeText(
+                "schema = 1\noutput = \"generated\"\n"
+            )
+        val state = AeTeXState()
+
+        assertTrue(state.openProject(temporaryDirectory))
+        assertFalse(state.openDocument(outputFile))
         assertTrue(state.openDocuments.isEmpty())
     }
 }

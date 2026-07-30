@@ -9,10 +9,12 @@ import dev.aetex.editor.DocumentResult
 import dev.aetex.editor.DocumentService
 import dev.aetex.editor.EditableFileTypes
 import dev.aetex.editor.OpenDocument
+import dev.aetex.project.ProjectLoader
 import dev.aetex.project.ProjectScanException
 import dev.aetex.project.ProjectScanIssue
-import dev.aetex.project.ProjectScanner
 import dev.aetex.project.TeXProject
+import dev.aetex.project.configuration.ProjectConfigurationDiagnostic
+import dev.aetex.project.configuration.ProjectConfigurationDiagnosticSeverity
 import java.nio.file.Path
 import java.util.logging.Level
 import java.util.logging.Logger
@@ -23,7 +25,7 @@ data class UiMessage(
 )
 
 class AeTeXState(
-    private val projectScanner: ProjectScanner = ProjectScanner(),
+    private val projectLoader: ProjectLoader = ProjectLoader(),
     private val documentServiceFactory: (Path) -> DocumentService = ::DocumentService
 ) {
     var project: TeXProject? by mutableStateOf(null)
@@ -38,6 +40,10 @@ class AeTeXState(
         private set
 
     var projectScanIssues: List<ProjectScanIssue> by mutableStateOf(emptyList())
+        private set
+
+    var configurationDiagnostics: List<ProjectConfigurationDiagnostic> by
+        mutableStateOf(emptyList())
         private set
 
     private var documentService: DocumentService? = null
@@ -60,30 +66,37 @@ class AeTeXState(
         }
 
         return try {
-            val scanResult = projectScanner.scan(rootDirectory)
-            val service = documentServiceFactory(scanResult.project.rootDirectory)
+            val loadResult = projectLoader.load(rootDirectory)
+            val service = documentServiceFactory(loadResult.project.rootDirectory)
 
-            project = scanResult.project
-            projectScanIssues = scanResult.issues
+            project = loadResult.project
+            projectScanIssues = loadResult.scanIssues
+            configurationDiagnostics = loadResult.project.configurationDiagnostics
             documentService = service
             openDocuments.clear()
             activeDocumentPath = null
-            scanResult.issues.forEach { issue ->
+            loadResult.scanIssues.forEach { issue ->
                 LOGGER.log(
                     Level.WARNING,
                     "Project scan issue at ${issue.path}: ${issue.message}" +
                         issue.technicalDetails?.let { " ($it)" }.orEmpty()
                 )
             }
-            message = if (scanResult.issues.isEmpty()) {
-                null
-            } else {
-                UiMessage(
-                    text = "Project opened with ${scanResult.issues.size} unreadable " +
-                        "or skipped ${if (scanResult.issues.size == 1) "entry" else "entries"}.",
-                    isError = true
+            configurationDiagnostics.forEach { diagnostic ->
+                LOGGER.log(
+                    if (diagnostic.severity == ProjectConfigurationDiagnosticSeverity.ERROR) {
+                        Level.WARNING
+                    } else {
+                        Level.INFO
+                    },
+                    buildString {
+                        append("${diagnostic.code}: ${diagnostic.message}")
+                        diagnostic.technicalDetails?.let { append(" ($it)") }
+                    },
+                    diagnostic.cause
                 )
             }
+            message = projectMessage(loadResult.scanIssues, configurationDiagnostics)
             true
         } catch (error: ProjectScanException) {
             logTechnicalFailure("Project scan failed", error)
@@ -101,6 +114,11 @@ class AeTeXState(
         openDocuments.firstOrNull { it.path == normalizedPath }?.let {
             activeDocumentPath = it.path
             return true
+        }
+
+        if (isProjectMetadataOrOutput(normalizedPath)) {
+            showError("Project metadata and generated output are not editable documents.")
+            return false
         }
 
         if (!EditableFileTypes.isEditable(normalizedPath)) {
@@ -246,6 +264,38 @@ class AeTeXState(
 
     private fun logTechnicalFailure(message: String, error: Exception) {
         LOGGER.log(Level.WARNING, message, error)
+    }
+
+    private fun projectMessage(
+        scanIssues: List<ProjectScanIssue>,
+        diagnostics: List<ProjectConfigurationDiagnostic>
+    ): UiMessage? {
+        diagnostics.firstOrNull {
+            it.severity == ProjectConfigurationDiagnosticSeverity.ERROR
+        }?.let { diagnostic ->
+            return UiMessage(text = diagnostic.message, isError = true)
+        }
+        if (scanIssues.isNotEmpty()) {
+            return UiMessage(
+                text = "Project opened with ${scanIssues.size} unreadable " +
+                    "or skipped ${if (scanIssues.size == 1) "entry" else "entries"}.",
+                isError = true
+            )
+        }
+        return diagnostics.firstOrNull()?.let { diagnostic ->
+            UiMessage(text = diagnostic.message, isError = false)
+        }
+    }
+
+    private fun isProjectMetadataOrOutput(path: Path): Boolean {
+        val currentProject = project ?: return false
+        val metadataDirectory = currentProject.rootDirectory.resolve(".aetex")
+        if (path.startsWith(metadataDirectory)) {
+            return true
+        }
+        val outputDirectory =
+            currentProject.effectiveConfiguration.outputDirectory?.value ?: return false
+        return path.startsWith(outputDirectory)
     }
 
     companion object {

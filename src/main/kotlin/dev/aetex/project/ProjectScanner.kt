@@ -26,11 +26,31 @@ class ProjectScanException(
 class ProjectScanner(
     private val excludedDirectoryNames: Set<String> = DEFAULT_EXCLUDED_DIRECTORIES
 ) {
-    fun scan(rootDirectory: Path): ProjectScanResult {
-        val root = validateRoot(rootDirectory)
+    fun scan(
+        rootDirectory: Path,
+        additionalExcludedDirectories: Set<Path> = emptySet()
+    ): ProjectScanResult {
+        val root = resolveRoot(rootDirectory)
+        return scanResolvedRoot(root, additionalExcludedDirectories)
+    }
+
+    internal fun scanResolvedRoot(
+        root: Path,
+        additionalExcludedDirectories: Set<Path> = emptySet()
+    ): ProjectScanResult {
         val issues = mutableListOf<ProjectScanIssue>()
         val visitedDirectories = mutableSetOf<Path>()
-        val entries = scanDirectory(root, visitedDirectories, issues)
+        val normalizedExclusions = additionalExcludedDirectories
+            .map { path ->
+                if (path.isAbsolute) path.normalize() else root.resolve(path).normalize()
+            }
+            .toSet()
+        val entries = scanDirectory(
+            directory = root,
+            visitedDirectories = visitedDirectories,
+            issues = issues,
+            excludedDirectories = normalizedExclusions
+        )
 
         return ProjectScanResult(
             project = TeXProject(
@@ -41,7 +61,7 @@ class ProjectScanner(
         )
     }
 
-    private fun validateRoot(rootDirectory: Path): Path {
+    fun resolveRoot(rootDirectory: Path): Path {
         val normalized = rootDirectory.toAbsolutePath().normalize()
         if (!Files.exists(normalized, LinkOption.NOFOLLOW_LINKS)) {
             throw ProjectScanException("The selected project folder does not exist.")
@@ -68,7 +88,8 @@ class ProjectScanner(
     private fun scanDirectory(
         directory: Path,
         visitedDirectories: MutableSet<Path>,
-        issues: MutableList<ProjectScanIssue>
+        issues: MutableList<ProjectScanIssue>,
+        excludedDirectories: Set<Path>
     ): List<ProjectEntry> {
         val identity = try {
             directory.toRealPath(LinkOption.NOFOLLOW_LINKS)
@@ -92,7 +113,7 @@ class ProjectScanner(
         val entries = try {
             Files.newDirectoryStream(directory).use { stream ->
                 stream.mapNotNull { child ->
-                    createEntry(child, visitedDirectories, issues)
+                    createEntry(child, visitedDirectories, issues, excludedDirectories)
                 }
             }
         } catch (error: IOException) {
@@ -117,7 +138,8 @@ class ProjectScanner(
     private fun createEntry(
         path: Path,
         visitedDirectories: MutableSet<Path>,
-        issues: MutableList<ProjectScanIssue>
+        issues: MutableList<ProjectScanIssue>,
+        excludedDirectories: Set<Path>
     ): ProjectEntry? {
         val attributes = try {
             Files.readAttributes(
@@ -146,16 +168,20 @@ class ProjectScanner(
             (isSymbolicLink && Files.isDirectory(path))
 
         if (isDirectory) {
-            if (path.fileName.toString() in excludedDirectoryNames) {
+            val normalizedPath = path.toAbsolutePath().normalize()
+            if (
+                path.fileName.toString() in excludedDirectoryNames ||
+                normalizedPath in excludedDirectories
+            ) {
                 return null
             }
 
             return ProjectDirectory(
-                path = path.toAbsolutePath().normalize(),
+                path = normalizedPath,
                 children = if (isSymbolicLink) {
                     emptyList()
                 } else {
-                    scanDirectory(path, visitedDirectories, issues)
+                    scanDirectory(path, visitedDirectories, issues, excludedDirectories)
                 },
                 isSymbolicLink = isSymbolicLink
             )
@@ -169,6 +195,7 @@ class ProjectScanner(
 
     companion object {
         val DEFAULT_EXCLUDED_DIRECTORIES: Set<String> = setOf(
+            ".aetex",
             ".git",
             ".gradle",
             "build",

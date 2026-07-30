@@ -324,7 +324,7 @@ The current preview area must not be documented as implemented PDF support. The 
 ## ADR-0011 — Adopt a shared, versioned project configuration
 
 - **Date:** 2026-07-29
-- **Status:** Accepted
+- **Status:** Accepted (implemented)
 
 ### Context
 
@@ -342,7 +342,17 @@ The contract preserves ordinary LaTeX folders while giving future build, preview
 
 ### Consequences
 
-Configuration loading, validation, migration, and user-visible recovery states must be implemented before compilation. Unknown fields in supported schemas are warning-level when they do not prevent interpretation; unsupported schemas and corrupt known fields disable dependent workflows without rejecting the project directory. Local overrides, multiple targets, hooks, scripts, and other execution-bearing extensions require later decisions.
+Configuration loading, validation, and user-visible recovery states now precede
+future compilation work. Unknown fields in supported schemas are warning-level
+when they do not prevent interpretation; unsupported schemas and corrupt known
+fields disable dependent workflows without rejecting the project directory.
+Local overrides, multiple targets, hooks, scripts, and other execution-bearing
+extensions require later decisions.
+
+The schema 1 reader uses TomlJ `1.1.1`, a focused TOML 1.0 parser with typed
+values and source-positioned syntax errors. The implementation resolves
+effective defaults and main-document state without modifying project files.
+Interactive main confirmation and configuration writing remain future UI work.
 
 ### References
 
@@ -350,3 +360,5 @@ Configuration loading, validation, migration, and user-visible recovery states m
 - [Architecture Study 002](../architecture/002-project-configuration-study.md)
 - [Roadmap](../roadmap/roadmap.md)
 - [`TeXProject.kt`](../../src/main/kotlin/dev/aetex/project/TeXProject.kt)
+- [`ProjectLoader.kt`](../../src/main/kotlin/dev/aetex/project/ProjectLoader.kt)
+- [`ProjectConfigurationLoader.kt`](../../src/main/kotlin/dev/aetex/project/configuration/ProjectConfigurationLoader.kt)
