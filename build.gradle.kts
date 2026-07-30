@@ -19,6 +19,7 @@ dependencies {
     implementation(compose.desktop.currentOs)
     implementation(compose.material3)
     implementation("org.tomlj:tomlj:1.1.1")
+    implementation("org.apache.pdfbox:pdfbox:3.0.5")
 
     testImplementation(kotlin("test"))
 }

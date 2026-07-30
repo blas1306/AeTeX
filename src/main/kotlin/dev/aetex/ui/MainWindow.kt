@@ -78,7 +78,9 @@ fun MainWindow(state: AeTeXState) {
         ) {
             EditorToolbar(
                 canSave = state.activeDocument != null,
-                onSave = state::saveActiveDocument
+                canBuild = state.project?.effectiveConfiguration?.isReady == true,
+                onSave = state::saveActiveDocument,
+                onBuild = { state.requestBuild() }
             )
 
             state.message?.let { message ->
@@ -108,7 +110,11 @@ fun MainWindow(state: AeTeXState) {
                     modifier = Modifier.weight(1f)
                 )
 
-                PreviewPanel()
+                PreviewPanel(
+                    state = state.previewState,
+                    onViewportChanged = state::updatePreviewViewport,
+                    onRetryPage = state::retryPreviewPage
+                )
             }
         }
 
@@ -158,7 +164,9 @@ fun MainWindow(state: AeTeXState) {
 @Composable
 private fun EditorToolbar(
     canSave: Boolean,
-    onSave: () -> Unit
+    canBuild: Boolean,
+    onSave: () -> Unit,
+    onBuild: () -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -168,6 +176,12 @@ private fun EditorToolbar(
         horizontalArrangement = Arrangement.End,
         verticalAlignment = Alignment.CenterVertically
     ) {
+        Button(
+            onClick = onBuild,
+            enabled = canBuild
+        ) {
+            Text("Build")
+        }
         Button(
             onClick = onSave,
             enabled = canSave

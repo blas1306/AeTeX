@@ -13,8 +13,13 @@ class BuildSession internal constructor(
     val plan: BuildPlan,
     val createdAt: Instant,
     private val clock: BuildClock,
-    internal val log: BuildLog
+    internal val log: BuildLog,
+    val requestSequence: Long = 0L
 ) : CancellationSignal {
+    init {
+        require(requestSequence >= 0L)
+    }
+
     private var state: BuildState = BuildState.QUEUED
     private val queuedAt: Instant = createdAt
     private var startedAt: Instant? = null
@@ -34,7 +39,8 @@ class BuildSession internal constructor(
         startedAt = startedAt,
         cancellation = cancellation,
         finishedAt = finishedAt,
-        result = result
+        result = result,
+        requestSequence = requestSequence
     )
 
     @Synchronized

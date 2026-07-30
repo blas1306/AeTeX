@@ -32,6 +32,7 @@ class CompilationManager(
     private val sessions = LinkedHashMap<BuildSessionId, BuildSession>()
     private val slots = LinkedHashMap<String, OutputSlot>()
     private val listeners = CopyOnWriteArrayList<(BuildSessionSnapshot) -> Unit>()
+    private var nextRequestSequence = 0L
     private val recovery = QuarantineRecovery(
         coordinationStore,
         pathValidator,
@@ -74,7 +75,14 @@ class CompilationManager(
                     )
                 )
             }
-            session = BuildSession(id, plan, now, clock, log)
+            session = BuildSession(
+                id,
+                plan,
+                now,
+                clock,
+                log,
+                requestSequence = ++nextRequestSequence
+            )
             sessions[id] = session
             val key = plan.invocation.outputSpaceIdentity.comparisonKey
             val slot = slots.getOrPut(key) { OutputSlot() }

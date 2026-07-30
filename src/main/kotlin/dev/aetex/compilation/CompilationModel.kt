@@ -225,8 +225,20 @@ data class BuildSessionSnapshot(
     val startedAt: Instant?,
     val cancellation: BuildCancellation?,
     val finishedAt: Instant?,
-    val result: BuildResult?
-)
+    val result: BuildResult?,
+    /**
+     * Monotonic identity assigned by the owning CompilationManager.
+     *
+     * Timestamps are evidence, not ordering identities: clocks may return the
+     * same instant for consecutive requests. Zero is reserved for snapshots
+     * produced by compatibility fixtures outside a CompilationManager.
+     */
+    val requestSequence: Long = 0L
+) {
+    init {
+        require(requestSequence >= 0L)
+    }
+}
 
 sealed interface BuildRequestResult {
     data class Accepted(val session: BuildSessionSnapshot) : BuildRequestResult

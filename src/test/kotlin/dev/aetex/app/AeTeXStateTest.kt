@@ -1,9 +1,22 @@
 package dev.aetex.app
 
+import dev.aetex.compilation.BuildState
+import dev.aetex.compilation.CompilationManager
+import dev.aetex.compilation.FileBuildLogFactory
+import dev.aetex.compilation.FileCoordinationStore
 import dev.aetex.editor.OpenDocument
+import dev.aetex.preview.coordination.PreviewManager
+import dev.aetex.preview.domain.PreviewState
+import dev.aetex.preview.snapshotOf
+import dev.aetex.preview.successfulBuildResult
 import dev.aetex.project.configuration.PersistedConfigurationStatus
 import dev.aetex.project.configuration.ProjectConfigurationDiagnosticCode
 import java.nio.file.Path
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
+import kotlin.concurrent.thread
 import kotlin.io.path.createDirectory
 import kotlin.io.path.readText
 import kotlin.io.path.writeText
@@ -135,5 +148,58 @@ class AeTeXStateTest {
         assertTrue(state.openProject(temporaryDirectory))
         assertFalse(state.openDocument(outputFile))
         assertTrue(state.openDocuments.isEmpty())
+    }
+
+    @Test
+    fun `late callback captured before project replacement cannot restore old preview state`() {
+        val firstProject = temporaryDirectory.resolve("first-project").createDirectory()
+        val secondProject = temporaryDirectory.resolve("second-project").createDirectory()
+        val callbackEntered = CountDownLatch(1)
+        val releaseCallback = CountDownLatch(1)
+        val shouldBlock = AtomicBoolean(false)
+        val oldPreview = AtomicReference<PreviewManager>()
+        val compilation = CompilationManager(
+            logFactory = FileBuildLogFactory(temporaryDirectory.resolve("runtime/logs")),
+            coordinationStore =
+                FileCoordinationStore(temporaryDirectory.resolve("runtime/coordination"))
+        )
+        val state = AeTeXState(
+            compilationManagerFactory = { compilation },
+            previewManagerFactory = { manager, root ->
+                PreviewManager(manager, root).also { preview ->
+                    oldPreview.set(preview)
+                    preview.addStateListener { previewState ->
+                        if (
+                            shouldBlock.get() &&
+                            previewState is PreviewState.LoadingGeneration
+                        ) {
+                            callbackEntered.countDown()
+                            releaseCallback.await()
+                        }
+                    }
+                }
+            }
+        )
+        assertTrue(state.openProject(firstProject))
+        state.requestBuild()
+        val result = successfulBuildResult(firstProject, "late")
+        val running = snapshotOf(result, requestSequence = 1).copy(
+            state = BuildState.RUNNING,
+            result = null,
+            finishedAt = null
+        )
+        shouldBlock.set(true)
+        val publisher = thread {
+            oldPreview.get().acceptCompilationSnapshot(running)
+        }
+        assertTrue(callbackEntered.await(2, TimeUnit.SECONDS))
+
+        assertTrue(state.openProject(secondProject))
+        releaseCallback.countDown()
+        publisher.join(2_000)
+
+        assertTrue(!publisher.isAlive)
+        assertEquals(PreviewState.Empty, state.previewState)
+        state.shutdown()
     }
 }

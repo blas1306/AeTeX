@@ -3,6 +3,7 @@ package dev.aetex.app
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.runtime.setValue
 import dev.aetex.compilation.BuildFailure
 import dev.aetex.compilation.BuildFailureKind
@@ -24,6 +25,11 @@ import dev.aetex.project.ProjectScanIssue
 import dev.aetex.project.TeXProject
 import dev.aetex.project.configuration.ProjectConfigurationDiagnostic
 import dev.aetex.project.configuration.ProjectConfigurationDiagnosticSeverity
+import dev.aetex.preview.coordination.PreviewManager
+import dev.aetex.preview.domain.PreviewError
+import dev.aetex.preview.domain.PreviewErrorKind
+import dev.aetex.preview.domain.PreviewState
+import dev.aetex.preview.domain.RenderScale
 import java.nio.file.Path
 import java.util.Collections
 import java.util.concurrent.CompletableFuture
@@ -40,7 +46,9 @@ data class UiMessage(
 class AeTeXState(
     private val projectLoader: ProjectLoader = ProjectLoader(),
     private val documentServiceFactory: (Path) -> DocumentService = ::DocumentService,
-    private val compilationManagerFactory: () -> CompilationManager = ::CompilationManager
+    private val compilationManagerFactory: () -> CompilationManager = ::CompilationManager,
+    private val previewManagerFactory: (CompilationManager, Path) -> PreviewManager =
+        { manager, root -> PreviewManager(manager, root) }
 ) {
     var project: TeXProject? by mutableStateOf(null)
         private set
@@ -64,7 +72,14 @@ class AeTeXState(
 
     private var documentService: DocumentService? = null
     private var compilationManager: CompilationManager? = null
+    private val previewStateLock = Any()
+    private var previewManager: PreviewManager? = null
+    private var previewSubscription: AutoCloseable? = null
     private val retiringCompilationManagers = CopyOnWriteArrayList<CompletableFuture<Void>>()
+    private val retiringPreviewManagers = CopyOnWriteArrayList<CompletableFuture<Void>>()
+
+    var previewState: PreviewState by mutableStateOf(PreviewState.Empty)
+        private set
 
     val activeDocument: OpenDocument?
         get() = activeDocumentPath?.let { activePath ->
@@ -87,6 +102,15 @@ class AeTeXState(
             val loadResult = projectLoader.load(rootDirectory)
             val service = documentServiceFactory(loadResult.project.rootDirectory)
 
+            val oldPreview = synchronized(previewStateLock) {
+                previewSubscription?.close()
+                previewSubscription = null
+                val previous = previewManager
+                previewManager = null
+                previewState = PreviewState.Empty
+                previous
+            }
+            oldPreview?.let(::retirePreviewManager)
             compilationManager?.let(::retireCompilationManager)
             compilationManager = null
             project = loadResult.project
@@ -254,6 +278,7 @@ class AeTeXState(
                 )
             )
         }
+        ensurePreviewManager(manager, currentProject.rootDirectory)
         return manager.requestBuild(currentProject)
     }
 
@@ -267,7 +292,33 @@ class AeTeXState(
     fun observeBuild(sessionId: BuildSessionId): BuildSessionSnapshot? =
         compilationManager?.observeSession(sessionId)
 
+    fun updatePreviewViewport(
+        visiblePages: Set<Int>,
+        currentPageIndex: Int,
+        scale: RenderScale,
+        scrollDirection: Int = 0
+    ) {
+        previewManager?.updateViewport(
+            visiblePages,
+            currentPageIndex,
+            scale,
+            scrollDirection
+        )
+    }
+
+    fun retryPreviewPage(pageIndex: Int) {
+        previewManager?.retryPage(pageIndex)
+    }
+
     fun shutdown() {
+        val preview = synchronized(previewStateLock) {
+            val current = previewManager
+            previewManager = null
+            previewSubscription?.close()
+            previewSubscription = null
+            current
+        }
+        preview?.close()
         val manager = compilationManager
         compilationManager = null
         manager?.close()
@@ -279,6 +330,17 @@ class AeTeXState(
             }
         }
         retiringCompilationManagers.clear()
+        retiringPreviewManagers.toList().forEach {
+            try {
+                it.get(10, TimeUnit.SECONDS)
+            } catch (_: Exception) {
+                // Preview workers are daemonized and late publication is already suppressed.
+            }
+        }
+        retiringPreviewManagers.clear()
+        synchronized(previewStateLock) {
+            previewState = PreviewState.Closed
+        }
     }
 
     fun closeDocument(path: Path): Boolean {
@@ -378,6 +440,75 @@ class AeTeXState(
                 completion.completeExceptionally(error)
             } finally {
                 retiringCompilationManagers -= completion
+            }
+        }
+    }
+
+    private fun ensurePreviewManager(manager: CompilationManager, root: Path) {
+        synchronized(previewStateLock) {
+            if (previewManager != null) return
+        }
+        var createdPreview: PreviewManager? = null
+        try {
+            val preview = previewManagerFactory(manager, root)
+            createdPreview = preview
+            synchronized(previewStateLock) {
+                if (previewManager != null) {
+                    preview.close()
+                    return
+                }
+                previewManager = preview
+            }
+            val subscription = preview.addStateListener { state ->
+                synchronized(previewStateLock) {
+                    if (previewManager !== preview) return@addStateListener
+                    Snapshot.withMutableSnapshot {
+                        previewState = state
+                    }
+                }
+            }
+            synchronized(previewStateLock) {
+                if (previewManager === preview) {
+                    previewSubscription = subscription
+                } else {
+                    subscription.close()
+                }
+            }
+        } catch (error: Exception) {
+            val failedPreview = synchronized(previewStateLock) {
+                val failed = createdPreview?.takeIf { previewManager === it }
+                if (failed != null) {
+                    previewManager = null
+                    previewSubscription?.close()
+                    previewSubscription = null
+                }
+                failed
+            }
+            failedPreview?.close()
+            LOGGER.log(Level.WARNING, "PDF preview initialization failed.", error)
+            synchronized(previewStateLock) {
+                previewState = PreviewState.GenerationError(
+                    PreviewError(
+                        PreviewErrorKind.INTERNAL,
+                        "PDF preview could not be initialized.",
+                        technicalCause = error
+                    )
+                )
+            }
+        }
+    }
+
+    private fun retirePreviewManager(manager: PreviewManager) {
+        val completion = CompletableFuture<Void>()
+        retiringPreviewManagers += completion
+        Thread.startVirtualThread {
+            try {
+                manager.close()
+                completion.complete(null)
+            } catch (error: Throwable) {
+                completion.completeExceptionally(error)
+            } finally {
+                retiringPreviewManagers -= completion
             }
         }
     }

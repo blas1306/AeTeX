@@ -137,7 +137,7 @@ execution, caching, and compilation UI remain outside this milestone.
 
 ## Milestone 3 — PDF preview
 
-**Status:** Architecture accepted; implementation pending.
+**Status:** Complete.
 
 **Objective:** Display the generated PDF as part of the project workflow and
 update it safely after compilation.
@@ -172,6 +172,39 @@ repeatable engineering evidence for renderer evaluation.
 regenerated without manual reopening; preview state remains understandable
 during builds and failures; reload does not destabilize the editor or lock the
 output unexpectedly.
+
+The implemented preview system:
+
+- subscribes directly to the active project's `CompilationManager` and accepts
+  only terminal successful results with the exact validated `PRIMARY_PDF`;
+- captures each accepted artifact into a digest-identified private snapshot
+  under AeTeX runtime storage before opening it, with before/after identity
+  checks, a configurable 512 MiB source guard, and explicit cleanup;
+- owns immutable generation identities, atomic first-page promotion,
+  last-good stale/error presentation, retirement, cancellation, and idempotent
+  shutdown across project replacement and application close;
+- contains PDFBox `3.0.5` and all AWT rendering types inside one serialized
+  renderer adapter, exposing only immutable RGB rasters and page-space
+  geometry to the rest of the application;
+- lazily renders visible pages and a configurable one-page neighbor radius
+  through a bounded, priority- and starvation-aware scheduler with two daemon
+  workers, a 64-job queue, request/generation cancellation, duplicate
+  coalescing, and late-result suppression;
+- caches completed pages by generation, page, and normalized effective scale
+  under a configurable 192 MiB priority-aware weighted LRU budget, with
+  pre-render byte reservations, visible-page pins, and deterministic
+  invalidation;
+- applies discrete 25% effective raster-scale buckets from 50% through 400%,
+  combines logical zoom with display density, and enforces 8192-pixel
+  dimensions plus a 32-million-pixel per-raster ceiling;
+- provides a Compose Desktop vertical document view with real mixed page
+  geometry, lazy placeholders, current-page indication, previous/next
+  navigation, vertical and horizontal scrolling, zoom, page retry, and a
+  UI-owned Skia image copy whose lifecycle is independent of PDFBox; and
+- includes deterministic suites for snapshots/generations, PDFBox, cache,
+  scheduling/cancellation, manager handover, stale state, rapid A/B/C/D
+  replacement, scale/layout logic, and the Compose raster boundary without
+  requiring LaTeX.
 
 ## Milestone 4 — SyncTeX
 
