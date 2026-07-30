@@ -35,7 +35,7 @@ The implemented baseline includes:
 
 **Objective:** Persist the minimum project intent needed to identify a build target and prepare compilation without relying on hidden heuristics.
 
-Candidate capabilities:
+Required capabilities:
 
 - a project-owned, versioned configuration file;
 - explicit main-document path;
@@ -47,7 +47,7 @@ Candidate capabilities:
 - defaults that keep simple projects usable with minimal setup;
 - validation and user-facing errors for stale or invalid paths.
 
-The file name, serialization format, precedence rules, discovery rules, and migration behavior are deliberately undecided. A focused RFC must settle them before implementation.
+The normative [project configuration architecture](../architecture/002-project-configuration-system.md) defines the file location, TOML schema, defaults, discovery rules, and compatibility behavior that implementation must follow.
 
 **Exit criteria:** A project can be reopened with a validated root document and build-relevant settings; an unconfigured or invalid project has an explicit recoverable state; tests cover configuration loading, defaults, validation, and schema compatibility.
 

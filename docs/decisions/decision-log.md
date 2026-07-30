@@ -320,3 +320,33 @@ The current preview area must not be documented as implemented PDF support. The 
 - [`PreviewPanel.kt`](../../src/main/kotlin/dev/aetex/ui/panels/PreviewPanel.kt)
 - [Roadmap](../roadmap/roadmap.md)
 - Git commits `3d078bf` and `62d7f68`
+
+## ADR-0011 — Adopt a shared, versioned project configuration
+
+- **Date:** 2026-07-29
+- **Status:** Accepted
+
+### Context
+
+Compilation, PDF preview, and SyncTeX need persistent project intent that the current directory snapshot and nullable `mainDocument` do not provide. Architecture Study 002 established the direction for a manually editable, Git-friendly shared configuration and identified the remaining contract decisions.
+
+### Decision
+
+Use `.aetex/project.toml` as the single shared project-configuration file. Use TOML with a required integer `schema`, project-relative portable paths, one confirmed active main document, and optional `engine`, `strategy`, and `output` project defaults. Schema 1 supports `pdflatex`, `xelatex`, and `lualatex`, supports `latexmk` as its compilation strategy, defaults output to `build`, and keeps local configuration outside the current system.
+
+Projects without configuration and projects with invalid or unsupported configuration remain open for editing. Configuration-dependent workflows require a confirmed, valid effective configuration. Main-document detection and defaults must not rewrite the shared file without explicit user intent.
+
+### Reasons
+
+The contract preserves ordinary LaTeX folders while giving future build, preview, and synchronization systems stable and versionable input. Relative paths and shared-only values keep the file portable across collaborators. Explicit schema compatibility permits controlled evolution independently of AeTeX release versions.
+
+### Consequences
+
+Configuration loading, validation, migration, and user-visible recovery states must be implemented before compilation. Unknown fields in supported schemas are warning-level when they do not prevent interpretation; unsupported schemas and corrupt known fields disable dependent workflows without rejecting the project directory. Local overrides, multiple targets, hooks, scripts, and other execution-bearing extensions require later decisions.
+
+### References
+
+- [AeTeX Architecture 002](../architecture/002-project-configuration-system.md)
+- [Architecture Study 002](../architecture/002-project-configuration-study.md)
+- [Roadmap](../roadmap/roadmap.md)
+- [`TeXProject.kt`](../../src/main/kotlin/dev/aetex/project/TeXProject.kt)
