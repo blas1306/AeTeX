@@ -137,18 +137,41 @@ execution, caching, and compilation UI remain outside this milestone.
 
 ## Milestone 3 — PDF preview
 
-**Objective:** Display the generated PDF as part of the project workflow and update it safely after compilation.
+**Status:** Architecture accepted; implementation pending.
 
-Candidate capabilities:
+**Objective:** Display the generated PDF as part of the project workflow and
+update it safely after compilation.
 
-- loading the configured build output;
-- safe reload when the PDF is replaced or temporarily unavailable;
+Required capabilities:
+
+- accepting only the exact `PRIMARY_PDF` from a successful compilation result;
+- immutable document generations and preview-owned source snapshots;
+- lazy, incremental, density-aware rendering through PDFBox;
+- visible-page priority, cancellation, duplicate coalescing, and bounded
+  scheduling;
+- a memory-weighted page cache keyed by generation, page, and scale;
+- safe generation handover while retaining a clearly stale last-good preview;
 - preservation of page, zoom, and useful viewport state;
 - visible not-built, building, current, stale, and failed states;
 - handling for locked, partially written, removed, or regenerated files;
-- PDF resource cleanup that does not prevent later builds.
+- PDF resource cleanup that does not prevent later builds;
+- Compose integration that consumes rendered images without knowing or invoking
+  the PDF engine.
 
-**Exit criteria:** A successfully built PDF can be viewed and repeatedly regenerated without manual reopening; preview state remains understandable during builds and failures; reload does not destabilize the editor or lock the output unexpectedly.
+The normative
+[PDF preview architecture](../architecture/004-pdf-preview-system.md) selects
+Apache PDFBox 3.x behind an engine-neutral renderer and defines compilation
+intake, generations, scheduling, caching, concurrency, Compose boundaries,
+invariants, risks, and future extension points. The
+[PDF preview study](../architecture/004-pdf-preview-system-study.md) remains
+historical analysis, and the
+[experimental benchmark](../../tools/rendering-benchmark/README.md) remains the
+repeatable engineering evidence for renderer evaluation.
+
+**Exit criteria:** A successfully built PDF can be viewed and repeatedly
+regenerated without manual reopening; preview state remains understandable
+during builds and failures; reload does not destabilize the editor or lock the
+output unexpectedly.
 
 ## Milestone 4 — SyncTeX
 

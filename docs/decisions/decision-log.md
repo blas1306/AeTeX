@@ -417,3 +417,69 @@ cleaning, caching, and remote compilation require later architecture work.
 - [Architecture Study 003](../architecture/003-compilation-system-study.md)
 - [AeTeX Architecture 002](../architecture/002-project-configuration-system.md)
 - [Roadmap](../roadmap/roadmap.md)
+
+## ADR-0013 — Use PDFBox behind a generation-based preview system
+
+- **Date:** 2026-07-30
+- **Status:** Accepted
+
+### Context
+
+Architecture 003 now gives Preview one authoritative input: a successful
+`BuildResult` with an exact validated `PRIMARY_PDF`. Architecture Study 004
+identified reload, file lifetime, rendering, caching, concurrency, Compose, and
+future-extension boundaries. The standalone rendering benchmark then compared
+PDFBox and PDFium through the same audited adapter contract and synthetic
+corpus.
+
+### Decision
+
+Use Apache PDFBox 3.x as the initial production renderer behind an
+engine-neutral `DocumentRenderer`. Every accepted successful compilation
+creates an immutable preview-owned document generation from the result's exact
+`PRIMARY_PDF`. Render visible pages lazily through a bounded, cancellable,
+duplicate-coalescing scheduler; cache pages by generation, page, and effective
+scale under a memory-weighted priority-aware LRU policy; and give Compose only
+already-rendered engine-neutral images.
+
+Compilation results are the sole preview update authority. Preview does not
+open arbitrary PDFs or watch the filesystem for replacement. A generation uses
+a private immutable source snapshot so renderer lifetime cannot lock or observe
+later changes to the compilation output. PDFium remains the primary benchmark
+comparator and replacement candidate, not a production dependency.
+
+### Reasons
+
+The audited Linux run showed usable adapter-level page latency and expected
+robustness behavior for PDFBox, while PDFium was faster in several important
+text, page-count, and scale cases and PDFBox was faster for the image-heavy
+fixture. The evidence therefore supports PDFBox sufficiency, not universal
+performance superiority.
+
+PDFBox integrates directly with the existing JVM application, uses the Apache
+License 2.0, and avoids a production native binding, per-platform binaries,
+ABI/loading issues, signing, and a separate native update supply chain. The
+engine-neutral boundary preserves the ability to adopt PDFium if broader
+cross-platform evidence later justifies those costs.
+
+### Consequences
+
+Preview implementation must add explicit generation, snapshot, scheduler,
+cache, renderer-port, and image-lifetime contracts. PDFBox access to one
+generation is serialized. Cache and concurrency limits are memory-aware rather
+than page-count-based. Stale or cancelled work cannot publish, and compilation
+and preview failures remain distinct.
+
+The benchmark does not establish Windows/macOS RSS, full real-world fidelity,
+Compose scrolling behavior, snapshot cost, or all optional-codec behavior.
+Those remain release-validation and upgrade gates. Renderer changes require a
+new accepted decision supported by a rerun of the benchmark and operational,
+licensing, and packaging evidence.
+
+### References
+
+- [AeTeX Architecture 004](../architecture/004-pdf-preview-system.md)
+- [Architecture Study 004](../architecture/004-pdf-preview-system-study.md)
+- [Experimental rendering benchmark](../../tools/rendering-benchmark/README.md)
+- [AeTeX Architecture 003](../architecture/003-compilation-system.md)
+- [Roadmap](../roadmap/roadmap.md)
