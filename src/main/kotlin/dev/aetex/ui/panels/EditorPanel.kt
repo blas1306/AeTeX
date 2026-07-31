@@ -23,6 +23,8 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -34,6 +36,10 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
@@ -46,6 +52,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalDensity
 import dev.aetex.editor.EditorTextLayout
+import dev.aetex.editor.EditorCaretBounds
+import dev.aetex.editor.EditorCaretLayout
+import dev.aetex.editor.EditorCaretViewportCoordinator
+import dev.aetex.editor.EditorViewport
 import dev.aetex.editor.LogicalLineIndex
 import dev.aetex.editor.acceptsEditorLayout
 import dev.aetex.editor.editorLineGeometry
@@ -163,7 +173,36 @@ private fun EditorTextField(
     var value by remember(document.path) { mutableStateOf(TextFieldValue(document.content)) }
     var focused by remember(document.path) { mutableStateOf(false) }
     var layoutSnapshot by remember(document.path) { mutableStateOf<EditorLayoutSnapshot?>(null) }
+    var documentRevision by remember(document.path) { mutableLongStateOf(0L) }
+    var textRevision by remember(document.path) { mutableLongStateOf(0L) }
+    var coordinatorRevision by remember(document.path) { mutableLongStateOf(0L) }
+    var viewportHeight by remember(document.path) { mutableIntStateOf(0) }
     val verticalScroll = rememberScrollState()
+    val caretViewportCoordinator = remember(document.path) {
+        EditorCaretViewportCoordinator().apply {
+            activateDocument(
+                documentRevision = 0L,
+                textRevision = 0L,
+                text = document.content,
+                selectionStart = value.selection.start,
+                selectionEnd = value.selection.end
+            )
+        }
+    }
+    val manualScrollObserver = remember(caretViewportCoordinator) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (
+                    source == NestedScrollSource.UserInput &&
+                    available.y != 0f &&
+                    caretViewportCoordinator.onManualViewportChange()
+                ) {
+                    coordinatorRevision++
+                }
+                return Offset.Zero
+            }
+        }
+    }
     val lexer = remember(document.path) { IncrementalLatexLexer() }
     val transformation = remember(document.path, theme) {
         LatexVisualTransformation(lexer, theme)
@@ -178,6 +217,8 @@ private fun EditorTextField(
     LaunchedEffect(document.content) {
         if (value.text != document.content) {
             layoutSnapshot = null
+            documentRevision++
+            textRevision++
             value = value.copy(
                 text = document.content,
                 selection = TextRange(
@@ -186,6 +227,14 @@ private fun EditorTextField(
                 ),
                 composition = null
             )
+            caretViewportCoordinator.activateDocument(
+                documentRevision = documentRevision,
+                textRevision = textRevision,
+                text = value.text,
+                selectionStart = value.selection.start,
+                selectionEnd = value.selection.end
+            )
+            coordinatorRevision++
         }
     }
 
@@ -195,7 +244,11 @@ private fun EditorTextField(
         value.text.length
     )
     val layout = layoutSnapshot
-        ?.takeIf { it.text == value.text }
+        ?.takeIf {
+            it.documentRevision == documentRevision &&
+                it.textRevision == textRevision &&
+                it.text == value.text
+        }
         ?.layout
     val layoutAdapter = remember(layout) { layout?.let(::ComposeEditorTextLayout) }
     val geometries = remember(value.text, logicalLines, layoutAdapter) {
@@ -230,24 +283,53 @@ private fun EditorTextField(
     val gutterWidthPx = digitWidth * digitCount + gutterHorizontalPadding * 2
     val gutterWidth = with(density) { gutterWidthPx.toDp() }
     val editorTopPadding = with(density) { 12.dp.toPx() }
+    val caretRevealMargin = with(density) { 8.dp.toPx() }
     val measuredNumbers = remember(logicalLines.lineCount, lineNumberStyle, textMeasurer) {
         List(logicalLines.lineCount) { line ->
             textMeasurer.measure((line + 1).toString(), style = lineNumberStyle)
         }
     }
+    // Capture immutable revision values in this callback. An onTextLayout from a
+    // superseded composition must retain its old identity and be rejected below.
+    val layoutDocumentRevision = documentRevision
+    val layoutTextRevision = textRevision
+    val layoutCanonicalText = value.text
 
     CompositionLocalProvider(LocalTextSelectionColors provides selectionColors) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .clipToBounds()
+                .onSizeChanged { viewportHeight = it.height }
+                .nestedScroll(manualScrollObserver)
                 .verticalScroll(verticalScroll)
         ) {
             BasicTextField(
                 value = value,
                 onValueChange = { updated ->
-                    if (updated.text != value.text) layoutSnapshot = null
+                    val textChanged = updated.text != value.text
+                    val selectionChanged = updated.selection != value.selection
+                    if (!textChanged && !selectionChanged && updated.composition == value.composition) {
+                        return@BasicTextField
+                    }
+                    if (textChanged) {
+                        layoutSnapshot = null
+                        textRevision++
+                    }
                     value = updated
+                    if (textChanged || selectionChanged) {
+                        if (
+                            caretViewportCoordinator.onEditorAction(
+                                documentRevision = documentRevision,
+                                textRevision = textRevision,
+                                text = updated.text,
+                                selectionStart = updated.selection.start,
+                                selectionEnd = updated.selection.end
+                            )
+                        ) {
+                            coordinatorRevision++
+                        }
+                    }
                     if (shouldPublishEditorTextChange(updated.text, document.content)) {
                         onDocumentChanged(document.path, updated.text)
                     }
@@ -293,19 +375,81 @@ private fun EditorTextField(
                 visualTransformation = transformation,
                 onTextLayout = { candidate ->
                     val laidOutText = candidate.layoutInput.text.text
-                    if (acceptsEditorLayout(value.text, laidOutText)) {
-                        layoutSnapshot = EditorLayoutSnapshot(laidOutText, candidate)
+                    if (acceptsEditorLayout(layoutCanonicalText, laidOutText)) {
+                        layoutSnapshot = EditorLayoutSnapshot(
+                            documentRevision = layoutDocumentRevision,
+                            textRevision = layoutTextRevision,
+                            text = laidOutText,
+                            layout = candidate
+                        )
+                        coordinatorRevision++
                     }
                 }
             )
         }
     }
+
+    val matchingLayout = layoutSnapshot?.takeIf {
+        it.documentRevision == documentRevision &&
+            it.textRevision == textRevision &&
+            it.text == value.text
+    }
+    LaunchedEffect(
+        coordinatorRevision,
+        matchingLayout,
+        viewportHeight,
+        verticalScroll.maxValue
+    ) {
+        val snapshot = matchingLayout ?: return@LaunchedEffect
+        val reveal = caretViewportCoordinator.resolve(
+            layout = ComposeEditorCaretLayout(snapshot),
+            viewport = EditorViewport(
+                scroll = verticalScroll.value,
+                maximumScroll = verticalScroll.maxValue,
+                height = viewportHeight,
+                textTopPadding = editorTopPadding,
+                revealMargin = caretRevealMargin
+            )
+        ) ?: return@LaunchedEffect
+        if (!caretViewportCoordinator.isCurrent(reveal)) return@LaunchedEffect
+        if (reveal.requiresScroll) verticalScroll.scrollTo(reveal.targetScroll)
+        caretViewportCoordinator.complete(reveal)
+    }
 }
 
 private data class EditorLayoutSnapshot(
+    val documentRevision: Long,
+    val textRevision: Long,
     val text: String,
     val layout: TextLayoutResult
 )
+
+private class ComposeEditorCaretLayout(
+    snapshot: EditorLayoutSnapshot
+) : EditorCaretLayout {
+    private val delegate = snapshot.layout
+    override val documentRevision: Long = snapshot.documentRevision
+    override val textRevision: Long = snapshot.textRevision
+    override val text: String = snapshot.text
+
+    override fun caretBounds(offset: Int): EditorCaretBounds {
+        val canonicalOffset = offset.coerceIn(0, text.length)
+        runCatching { delegate.getCursorRect(canonicalOffset) }.getOrNull()?.let { cursor ->
+            if (
+                cursor.top.isFinite() &&
+                cursor.bottom.isFinite() &&
+                cursor.bottom > cursor.top
+            ) {
+                return EditorCaretBounds(cursor.top, cursor.bottom)
+            }
+        }
+        val visualLine = delegate.getLineForOffset(canonicalOffset)
+        return EditorCaretBounds(
+            top = delegate.getLineTop(visualLine),
+            bottom = delegate.getLineBottom(visualLine)
+        )
+    }
+}
 
 private class ComposeEditorTextLayout(
     private val delegate: TextLayoutResult
