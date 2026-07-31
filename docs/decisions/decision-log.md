@@ -483,3 +483,50 @@ licensing, and packaging evidence.
 - [Experimental rendering benchmark](../../tools/rendering-benchmark/README.md)
 - [AeTeX Architecture 003](../architecture/003-compilation-system.md)
 - [Roadmap](../roadmap/roadmap.md)
+
+## ADR-0014 — Keep workspace layout explicit and user-level
+
+- **Date:** 2026-07-31
+- **Status:** Accepted (implemented)
+
+### Context
+
+The original Compose workspace assigned fixed 260 dp and 480 dp widths to the
+Project and Preview panels. The editor alone received remaining width. There
+was no preference store, panel visibility model, divider boundary, or explicit
+window constraint.
+
+### Decision
+
+Represent the three-region workspace with one immutable `WorkspaceLayout`
+model in dp. Keep it independent of project, compilation, and preview domain
+ownership. Resolve available width deterministically with an editor-first
+minimum policy, explicit side-panel minimums, fixed divider targets, and
+an always-visible Project tool rail plus a compact closed-Preview edge
+affordance. Preview view state uses explicit Fit Width, Fit Page, and Fixed
+zoom identities; only normalized density-aware raster scales enter cache keys.
+
+Persist only the user-level layout in versioned UTF-8 TOML under the operating
+system's user configuration directory. Coalesce drag writes, publish by
+temporary-file replacement, validate every loaded value, ignore unknown
+schema-1 fields, and fall back to defaults on corruption or unsupported
+schemas.
+
+### Consequences
+
+Dragging and hiding panels cannot request compilation, replace a project, or
+retire a Preview generation. Compose may dispose hidden view resources while
+the owning managers and current artifact remain intact. Project-tree expansion
+and Preview zoom are held above conditional panel composition. Zoom remains
+session-level because derived fit percentages are not canonical workspace
+preferences.
+
+The model does not generalize into docking. Arbitrary docking, floating
+windows, user-customizable tool-rail ordering, tabbed tool windows, per-project
+layouts, and window-position persistence remain outside this decision.
+
+### References
+
+- [AeTeX Architecture 005](../architecture/005-workspace-layout.md)
+- [Workspace user guide](../user-guide/workspace.md)
+- [Roadmap](../roadmap/roadmap.md)

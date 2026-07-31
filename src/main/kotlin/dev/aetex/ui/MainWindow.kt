@@ -38,9 +38,6 @@ import dev.aetex.project.ProjectInitializationPlan
 import dev.aetex.project.ProjectInitializationPlanResult
 import dev.aetex.project.chooseProjectDirectory
 import dev.aetex.project.chooseProjectParentDirectory
-import dev.aetex.ui.panels.EditorPanel
-import dev.aetex.ui.panels.PreviewPanel
-import dev.aetex.ui.panels.ProjectPanel
 import java.nio.file.Path
 import java.nio.file.InvalidPathException
 import kotlinx.coroutines.Dispatchers
@@ -202,38 +199,21 @@ fun MainWindow(state: AeTeXState) {
                 )
             }
 
-            Row(modifier = Modifier.weight(1f)) {
-                ProjectPanel(
-                    project = state.project,
-                    activeDocumentPath = state.activeDocumentPath,
-                    onCreateProject = {
-                        createProjectError = null
-                        showCreateProjectDialog = true
-                    },
-                    onOpenProject = {
-                        chooseProjectDirectory()?.let {
-                            requestProjectAction(PendingProjectAction.Open(it))
-                        }
-                    },
-                    onInitializeProject = ::beginInitialization,
-                    onFileSelected = state::openDocument
-                )
-
-                EditorPanel(
-                    documents = state.openDocuments,
-                    activeDocument = state.activeDocument,
-                    onDocumentActivated = state::activateDocument,
-                    onDocumentChanged = state::updateDocument,
-                    onDocumentCloseRequested = ::requestDocumentClose,
-                    modifier = Modifier.weight(1f)
-                )
-
-                PreviewPanel(
-                    state = state.previewState,
-                    onViewportChanged = state::updatePreviewViewport,
-                    onRetryPage = state::retryPreviewPage
-                )
-            }
+            Workspace(
+                state = state,
+                onCreateProject = {
+                    createProjectError = null
+                    showCreateProjectDialog = true
+                },
+                onOpenProject = {
+                    chooseProjectDirectory()?.let {
+                        requestProjectAction(PendingProjectAction.Open(it))
+                    }
+                },
+                onInitializeProject = ::beginInitialization,
+                onDocumentCloseRequested = ::requestDocumentClose,
+                modifier = Modifier.weight(1f)
+            )
         }
 
         pendingProjectAction?.let { pendingAction ->

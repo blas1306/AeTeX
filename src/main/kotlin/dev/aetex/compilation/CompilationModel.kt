@@ -157,7 +157,10 @@ data class BuildDiagnostic(
     val column: Int? = null,
     val relatedEventSequence: Long? = null,
     val confidence: DiagnosticConfidence = DiagnosticConfidence.CONSERVATIVE,
-    val technicalDetail: String? = null
+    val technicalDetail: String? = null,
+    /** Bounded path spelling from the tool; never use this field for navigation. */
+    val reportedPath: String? = null,
+    val contextLine: String? = null
 )
 
 data class ProcessIdentity(

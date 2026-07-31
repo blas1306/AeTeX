@@ -227,6 +227,80 @@ The implemented preview system:
   replacement, scale/layout logic, and the Compose raster boundary without
   requiring LaTeX.
 
+## Milestone 3.1 — Persistent workspace panels
+
+**Status:** Complete.
+
+**Objective:** Make the established Project, Editor, and PDF Preview workspace
+adaptable without changing any project, compilation, or preview lifecycle.
+
+The implemented workspace:
+
+- replaces fixed side widths with one explicit, Compose-independent
+  `WorkspaceLayout` using canonical dp measurements;
+- starts with 260 dp Project and 360 dp Preview preferences, 180/260 dp
+  expanded minimums, and a 320 dp editor minimum;
+- provides two visible 1 dp dividers with 8 dp drag targets and desktop resize
+  cursors;
+- keeps drag calculations bounded by the opposite panel and editor minimum;
+- provides a persistent 44 dp Project tool rail, a zero-expanded-width closed
+  Project state, and a compact right-edge Preview restore affordance;
+- provides Fit Width, Fit Page, and clamped Fixed PDF zoom modes with an
+  effective-percentage display and density-aware normalized raster keys;
+- preserves last-expanded widths, Project expansion, Preview zoom, project
+  identity, manager ownership, and the current Preview generation;
+- stores versioned user-level UTF-8 TOML outside the project with bounded
+  parsing, safe defaults, debounced atomic replacement, final shutdown flush,
+  and stale-callback suppression; and
+- keeps narrow layouts deterministic without implicit auto-collapse.
+
+The normative
+[workspace-layout architecture](../architecture/005-workspace-layout.md)
+defines model invariants, sizing policy, lifecycle boundaries, preference
+locations, format, fallback behavior, and explicit non-goals. User controls
+and recovery behavior are described in the
+[workspace guide](../user-guide/workspace.md).
+
+**Exit evidence:** Pure layout, zoom, and persistence tests cover default,
+narrow, wide, drag, collapse, restoration, formulas, rotation, invalid input,
+scale normalization, schema compatibility, coalescing, atomic cleanup, and
+shutdown. Application-state integration tests cover project/document
+stability, Preview generation continuity, bounded responsive rendering, and
+manager retirement after project replacement.
+
+## Milestone 3.2 — Preview and editor visual quality
+
+**Status:** Implemented.
+
+**Objective:** Improve PDF text fidelity and establish a responsive,
+professional editor visual layer without changing preview, build, workspace,
+or project architecture.
+
+The implemented foundation:
+
+- separates logical zoom, physical display scale, and PDFBox raster scale;
+- applies density-aware 1.5× oversampling, upward 25% cache-bucket
+  normalization, the existing 50%–400% raster clamp, and all existing queue,
+  page-area, and 192 MiB cache bounds;
+- uses an opaque RGB renderer contract, an opaque BGRA Compose upload,
+  aspect-preserving display, and high-quality filtering;
+- centralizes editor colors in one dark `EditorTheme`, including caret,
+  selection, current line, gutter, brace, syntax, and error roles;
+- provides a high-contrast caret, focus-aware selection, and a restrained
+  current-line fill; and
+- adds a tolerant line-state LaTeX lexer that reuses unchanged lines and
+  propagates only until lexical state stabilizes.
+
+The syntax scope is lexical: commands, structural keywords, comments,
+environment names, optional and mandatory arguments, nested braces, math
+delimiters, numbers, strings, escapes, plain text, and unmatched closers. This
+milestone explicitly excludes autocompletion, semantic analysis, LSP,
+Tree-sitter, code folding, and diagnostics.
+
+**Exit evidence:** Deterministic policy, density, normalization, lexer,
+incremental-edit, theme-contrast, cache-bound, workspace-persistence, and
+lifecycle integration tests pass without screenshot assertions.
+
 ## Milestone 4 — SyncTeX
 
 **Objective:** Connect source locations and PDF positions in both directions.
@@ -267,7 +341,7 @@ TeX is programmable and context-sensitive. This milestone should optimize for ro
 
 Candidate capabilities:
 
-- LaTeX-aware syntax highlighting;
+- semantic/project-aware highlighting beyond the lexical foundation;
 - snippets and templates for recurring source constructs;
 - contextual command and environment completion;
 - completion and navigation for labels, references, citations, files, and resources;

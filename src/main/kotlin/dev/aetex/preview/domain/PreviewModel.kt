@@ -57,6 +57,21 @@ value class RenderScale private constructor(val milliScale: Int) : Comparable<Re
                 ) * BUCKET_MILLI_SCALE + MIN_MILLI_SCALE
             return RenderScale(bucket.coerceIn(MIN_MILLI_SCALE, MAX_MILLI_SCALE))
         }
+
+        /**
+         * Normalizes a raster request upward so bucket selection never turns a
+         * quality target into an undersized bitmap. The global render-scale
+         * bounds still apply, preserving the finite cache-key space.
+         */
+        fun normalizedRasterRequest(scale: Double): RenderScale {
+            require(scale.isFinite()) { "Render scale must be finite." }
+            val requested = (scale * 1000.0)
+                .coerceIn(MIN_MILLI_SCALE.toDouble(), MAX_MILLI_SCALE.toDouble())
+            val bucket = kotlin.math.ceil(
+                (requested - MIN_MILLI_SCALE) / BUCKET_MILLI_SCALE
+            ).toInt() * BUCKET_MILLI_SCALE + MIN_MILLI_SCALE
+            return RenderScale(bucket.coerceIn(MIN_MILLI_SCALE, MAX_MILLI_SCALE))
+        }
     }
 }
 

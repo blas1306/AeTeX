@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -19,6 +20,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -34,8 +38,11 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import dev.aetex.preview.domain.PagePreviewState
 import dev.aetex.preview.domain.PreviewDocument
@@ -44,41 +51,53 @@ import dev.aetex.preview.domain.RenderScale
 import dev.aetex.preview.domain.RenderedPage
 import dev.aetex.preview.ui.ComposePageImage
 import dev.aetex.preview.ui.PreviewLayoutLogic
+import dev.aetex.preview.ui.PreviewViewport
+import dev.aetex.preview.ui.PreviewZoom
+import dev.aetex.preview.ui.PreviewZoomMode
+import dev.aetex.preview.ui.ResolvedPreviewZoom
 import dev.aetex.preview.ui.VisiblePageMeasurement
+import dev.aetex.ui.IdeTooltip
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicReference
+import kotlin.math.roundToInt
+
+class PreviewPanelViewState {
+    var zoomMode by mutableStateOf<PreviewZoomMode>(PreviewZoomMode.DEFAULT)
+    var effectiveDisplayScale by mutableStateOf<Double?>(null)
+    var currentPage by mutableIntStateOf(0)
+    var navigationSequence by mutableIntStateOf(0)
+    var navigationTarget by mutableStateOf<Int?>(null)
+
+    fun navigateTo(pageIndex: Int) {
+        navigationTarget = pageIndex
+        navigationSequence++
+    }
+}
+
+@Composable
+fun rememberPreviewPanelViewState(): PreviewPanelViewState =
+    remember { PreviewPanelViewState() }
 
 @Composable
 fun PreviewPanel(
     state: PreviewState,
     onViewportChanged: (Set<Int>, Int, RenderScale, Int) -> Unit,
-    onRetryPage: (Int) -> Unit
+    onRetryPage: (Int) -> Unit,
+    viewState: PreviewPanelViewState,
+    onCollapse: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val presentation = state.presentation()
-    var scale by remember { mutableStateOf(RenderScale.DEFAULT) }
-    var currentPage by remember { mutableIntStateOf(0) }
-    var navigationSequence by remember { mutableIntStateOf(0) }
-    var navigationTarget by remember { mutableStateOf<Int?>(null) }
 
     Column(
-        modifier = Modifier
-            .width(480.dp)
+        modifier = modifier
             .fillMaxHeight()
             .background(Color(0xFF252526))
     ) {
-        PreviewToolbar(
-            document = presentation.document,
-            currentPage = currentPage,
-            scale = scale,
-            onScaleChanged = { scale = it },
-            onNavigate = { page ->
-                navigationTarget = page
-                navigationSequence++
-            }
-        )
+        PreviewHeader(onCollapse = onCollapse)
         presentation.notice?.let {
             Text(
                 text = it,
@@ -95,12 +114,24 @@ fun PreviewPanel(
                 Text(presentation.emptyMessage, color = Color(0xFFCCCCCC))
             }
         } else {
+            PreviewToolbar(
+                document = document,
+                currentPage = viewState.currentPage,
+                zoomMode = viewState.zoomMode,
+                effectiveDisplayScale = viewState.effectiveDisplayScale,
+                onZoomModeChanged = { viewState.zoomMode = it },
+                onNavigate = viewState::navigateTo
+            )
             DocumentPages(
                 document = document,
-                scale = scale,
-                navigationTarget = navigationTarget,
-                navigationSequence = navigationSequence,
-                onCurrentPageChanged = { currentPage = it },
+                zoomMode = viewState.zoomMode,
+                currentPage = viewState.currentPage,
+                navigationTarget = viewState.navigationTarget,
+                navigationSequence = viewState.navigationSequence,
+                onCurrentPageChanged = { viewState.currentPage = it },
+                onEffectiveZoomChanged = {
+                    viewState.effectiveDisplayScale = it.logicalScale
+                },
                 onViewportChanged = onViewportChanged,
                 onRetryPage = onRetryPage
             )
@@ -109,50 +140,156 @@ fun PreviewPanel(
 }
 
 @Composable
+private fun PreviewHeader(onCollapse: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0xFF2D2D30))
+            .padding(start = 12.dp, end = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text("PDF Preview", color = Color.White, modifier = Modifier.weight(1f))
+        IdeTooltip("Close PDF Preview") {
+            IconButton(
+                onClick = onCollapse,
+                modifier = Modifier.semantics {
+                    contentDescription = "Close PDF Preview panel"
+                }
+            ) {
+                Text("›", color = Color(0xFFD8D8D8))
+            }
+        }
+    }
+}
+
+@Composable
 private fun PreviewToolbar(
-    document: PreviewDocument?,
+    document: PreviewDocument,
     currentPage: Int,
-    scale: RenderScale,
-    onScaleChanged: (RenderScale) -> Unit,
+    zoomMode: PreviewZoomMode,
+    effectiveDisplayScale: Double?,
+    onZoomModeChanged: (PreviewZoomMode) -> Unit,
     onNavigate: (Int) -> Unit
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .background(Color(0xFF2D2D30))
-            .padding(horizontal = 8.dp, vertical = 5.dp),
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        Text("PDF Preview", color = Color.White, modifier = Modifier.weight(1f))
-        if (document != null) {
-            TextButton(
-                onClick = { onNavigate((currentPage - 1).coerceAtLeast(0)) },
-                enabled = currentPage > 0
-            ) {
-                Text("‹")
-            }
-            Text(
-                "${currentPage.coerceIn(document.metadata.pages.indices) + 1} / " +
-                    document.metadata.pageCount,
-                color = Color(0xFFDDDDDD)
-            )
+        TextButton(
+            onClick = { onNavigate((currentPage - 1).coerceAtLeast(0)) },
+            enabled = currentPage > 0
+        ) {
+            Text("‹")
+        }
+        Text(
+            "${currentPage.coerceIn(document.metadata.pages.indices) + 1} / " +
+                document.metadata.pageCount,
+            color = Color(0xFFDDDDDD)
+        )
+        TextButton(
+            onClick = {
+                onNavigate(
+                    (currentPage + 1).coerceAtMost(document.metadata.pageCount - 1)
+                )
+            },
+            enabled = currentPage < document.metadata.pageCount - 1
+        ) {
+            Text("›")
+        }
+        IdeTooltip("Zoom out") {
             TextButton(
                 onClick = {
-                    onNavigate(
-                        (currentPage + 1).coerceAtMost(document.metadata.pageCount - 1)
+                    onZoomModeChanged(
+                        PreviewZoom.stepFixed(zoomMode, effectiveDisplayScale, -1)
                     )
                 },
-                enabled = currentPage < document.metadata.pageCount - 1
+                modifier = Modifier.semantics {
+                    contentDescription = "Zoom out"
+                }
             ) {
-                Text("›")
-            }
-            TextButton(onClick = { onScaleChanged(PreviewLayoutLogic.zoom(scale, -1)) }) {
                 Text("−")
             }
-            Text("${scale.percentage}%", color = Color.White)
-            TextButton(onClick = { onScaleChanged(PreviewLayoutLogic.zoom(scale, 1)) }) {
+        }
+        ZoomSelector(
+            mode = zoomMode,
+            effectiveDisplayScale = effectiveDisplayScale,
+            onModeChanged = onZoomModeChanged
+        )
+        IdeTooltip("Zoom in") {
+            TextButton(
+                onClick = {
+                    onZoomModeChanged(
+                        PreviewZoom.stepFixed(zoomMode, effectiveDisplayScale, 1)
+                    )
+                },
+                modifier = Modifier.semantics {
+                    contentDescription = "Zoom in"
+                }
+            ) {
                 Text("+")
+            }
+        }
+    }
+}
+
+@Composable
+private fun ZoomSelector(
+    mode: PreviewZoomMode,
+    effectiveDisplayScale: Double?,
+    onModeChanged: (PreviewZoomMode) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val percentage = when (mode) {
+        is PreviewZoomMode.Fixed -> mode.scale.percentage
+        else -> effectiveDisplayScale
+            ?.takeIf { it.isFinite() && it > 0.0 }
+            ?.let { (it * 100.0).roundToInt() }
+            ?: RenderScale.DEFAULT.percentage
+    }
+    Box {
+        TextButton(
+            onClick = { expanded = true },
+            modifier = Modifier.semantics {
+                contentDescription = "PDF zoom mode and scale"
+            }
+        ) {
+            Text(
+                when (mode) {
+                    PreviewZoomMode.FitWidth -> "Fit Width · $percentage%"
+                    PreviewZoomMode.FitPage -> "Fit Page · $percentage%"
+                    is PreviewZoomMode.Fixed -> "$percentage%"
+                }
+            )
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            listOf(
+                "Fit Width" to PreviewZoomMode.FitWidth,
+                "Fit Page" to PreviewZoomMode.FitPage
+            ).forEach { (label, selection) ->
+                DropdownMenuItem(
+                    text = { Text(label) },
+                    onClick = {
+                        onModeChanged(selection)
+                        expanded = false
+                    }
+                )
+            }
+            listOf(50, 75, 100, 125, 150, 200).forEach { fixedPercentage ->
+                DropdownMenuItem(
+                    text = { Text("$fixedPercentage%") },
+                    onClick = {
+                        onModeChanged(PreviewZoom.fixedPercentage(fixedPercentage))
+                        expanded = false
+                    }
+                )
             }
         }
     }
@@ -161,7 +298,79 @@ private fun PreviewToolbar(
 @Composable
 private fun DocumentPages(
     document: PreviewDocument,
-    scale: RenderScale,
+    zoomMode: PreviewZoomMode,
+    currentPage: Int,
+    navigationTarget: Int?,
+    navigationSequence: Int,
+    onCurrentPageChanged: (Int) -> Unit,
+    onEffectiveZoomChanged: (ResolvedPreviewZoom) -> Unit,
+    onViewportChanged: (Set<Int>, Int, RenderScale, Int) -> Unit,
+    onRetryPage: (Int) -> Unit
+) {
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val displayDensity = LocalDensity.current.density.toDouble()
+        val pageIndex = currentPage.coerceIn(document.metadata.pages.indices)
+        val viewport = PreviewViewport(
+            widthDp = maxWidth.value.toDouble(),
+            heightDp = maxHeight.value.toDouble()
+        )
+        val resolvedZoom = remember(
+            document.generationId,
+            zoomMode,
+            pageIndex,
+            viewport,
+            displayDensity
+        ) {
+            PreviewZoom.resolve(
+                mode = zoomMode,
+                viewport = viewport,
+                page = document.metadata.pages[pageIndex],
+                displayDensity = displayDensity
+            )
+        }
+        val logicalScale = resolvedZoom?.logicalScale
+            ?: (zoomMode as? PreviewZoomMode.Fixed)?.scale?.value?.toDouble()
+            ?: RenderScale.DEFAULT.value.toDouble()
+        val rasterScale = resolvedZoom?.rasterScale ?: RenderScale.DEFAULT
+        val maximumWidth = remember(document.generationId, logicalScale, viewport.widthDp) {
+            val safeViewportWidth = viewport.widthDp
+                .takeIf { it.isFinite() && it > 0.0 }
+                ?.coerceAtMost(100_000.0)
+                ?.toFloat()
+                ?: 1f
+            maxOf(
+                safeViewportWidth,
+                PreviewLayoutLogic.safeDisplayExtent(
+                    document.metadata.maximumDisplayedWidthPoints,
+                    logicalScale
+                ) + PreviewViewport.DEFAULT_HORIZONTAL_PADDING_DP.toFloat()
+            )
+        }
+        LaunchedEffect(resolvedZoom) {
+            resolvedZoom?.let(onEffectiveZoomChanged)
+        }
+        DocumentPageList(
+            document = document,
+            logicalScale = logicalScale,
+            rasterScale = rasterScale,
+            maximumWidth = maximumWidth,
+            recenterHorizontally = zoomMode !is PreviewZoomMode.Fixed,
+            navigationTarget = navigationTarget,
+            navigationSequence = navigationSequence,
+            onCurrentPageChanged = onCurrentPageChanged,
+            onViewportChanged = onViewportChanged,
+            onRetryPage = onRetryPage
+        )
+    }
+}
+
+@Composable
+private fun DocumentPageList(
+    document: PreviewDocument,
+    logicalScale: Double,
+    rasterScale: RenderScale,
+    maximumWidth: Float,
+    recenterHorizontally: Boolean,
     navigationTarget: Int?,
     navigationSequence: Int,
     onCurrentPageChanged: (Int) -> Unit,
@@ -170,18 +379,19 @@ private fun DocumentPages(
 ) {
     val verticalState = rememberLazyListState()
     val horizontalState = rememberScrollState()
-    val displayDensity = LocalDensity.current.density
-    val effectiveScale = RenderScale.normalized((scale.value * displayDensity).toDouble())
-    val maximumWidth = remember(document.generationId, scale) {
-        PreviewLayoutLogic.safeDisplayExtent(
-            document.metadata.maximumDisplayedWidthPoints,
-            scale
-        )
-    }
     val latestViewportCallback by rememberUpdatedState(onViewportChanged)
     val latestCurrentPageCallback by rememberUpdatedState(onCurrentPageChanged)
     var previousFirstVisible by remember(document.generationId) {
         mutableIntStateOf(document.currentPageIndex)
+    }
+
+    LaunchedEffect(document.generationId, maximumWidth, recenterHorizontally) {
+        if (recenterHorizontally) {
+            snapshotFlow { horizontalState.maxValue }
+                .collectLatest { maximumScroll ->
+                    horizontalState.scrollTo(maximumScroll / 2)
+                }
+        }
     }
 
     LaunchedEffect(document.generationId) {
@@ -201,7 +411,7 @@ private fun DocumentPages(
         }
     }
 
-    LaunchedEffect(document.generationId, scale, effectiveScale, verticalState) {
+    LaunchedEffect(document.generationId, rasterScale, verticalState) {
         snapshotFlow {
             val layout = verticalState.layoutInfo
             val measurements = layout.visibleItemsInfo.map {
@@ -218,7 +428,7 @@ private fun DocumentPages(
             val direction = firstVisible.compareTo(previousFirstVisible)
             previousFirstVisible = firstVisible
             latestCurrentPageCallback(current)
-            latestViewportCallback(visible, current, effectiveScale, direction)
+            latestViewportCallback(visible, current, rasterScale, direction)
         }
     }
 
@@ -240,9 +450,15 @@ private fun DocumentPages(
             items(document.metadata.pageCount, key = { it }) { pageIndex ->
                 val geometry = document.metadata.pages[pageIndex]
                 val width =
-                    PreviewLayoutLogic.safeDisplayExtent(geometry.displayedWidthPoints, scale)
+                    PreviewLayoutLogic.safeDisplayExtent(
+                        geometry.displayedWidthPoints,
+                        logicalScale
+                    )
                 val height =
-                    PreviewLayoutLogic.safeDisplayExtent(geometry.displayedHeightPoints, scale)
+                    PreviewLayoutLogic.safeDisplayExtent(
+                        geometry.displayedHeightPoints,
+                        logicalScale
+                    )
                 PageItem(
                     pageIndex = pageIndex,
                     state = document.pageState(pageIndex),
@@ -327,7 +543,8 @@ private fun BoxScopePageImage(page: RenderedPage) {
         bitmap = composeImage.imageBitmap,
         contentDescription = "Rendered PDF page ${page.key.pageIndex + 1}",
         modifier = Modifier.fillMaxSize(),
-        contentScale = ContentScale.FillBounds
+        contentScale = ContentScale.Fit,
+        filterQuality = FilterQuality.High
     )
 }
 

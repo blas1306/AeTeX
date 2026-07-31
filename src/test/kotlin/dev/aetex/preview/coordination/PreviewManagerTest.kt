@@ -399,6 +399,64 @@ class PreviewManagerTest {
     }
 
     @Test
+    fun `rapid responsive scale changes supersede obsolete requests within bounds`() {
+        val root = temporaryDirectory.resolve("responsive-project")
+        val responsiveRenderStarted = CountDownLatch(1)
+        val releaseResponsiveRender = CountDownLatch(1)
+        val renderer = FakeRenderer(
+            dev.aetex.preview.domain.DocumentMetadata(
+                listOf(
+                    dev.aetex.preview.domain.PageGeometry(200f, 300f),
+                    dev.aetex.preview.domain.PageGeometry(300f, 200f)
+                ),
+                "fake",
+                "1"
+            ),
+            beforeRender = { key ->
+                if (key.scale != RenderScale.DEFAULT) {
+                    responsiveRenderStarted.countDown()
+                    releaseResponsiveRender.await()
+                }
+            }
+        )
+        val manager = manager(root) {
+            PreviewResult.Success(
+                testGeneration(
+                    temporaryDirectory,
+                    renderer = renderer,
+                    sessionId = it.sessionId
+                )
+            )
+        }
+        manager.acceptCompilationSnapshot(snapshotOf(successfulBuildResult(root)))
+        val initial = awaitState(manager) { it is PreviewState.Ready } as PreviewState.Ready
+        val generation = initial.document.generationId
+
+        manager.updateViewport(setOf(0), 0, RenderScale.normalized(0.75))
+        assertTrue(responsiveRenderStarted.await(2, TimeUnit.SECONDS))
+        listOf(1.0, 1.26, 1.34, 1.5, 1.0, 1.25, 1.0, 1.5).forEach {
+            manager.updateViewport(setOf(0), 0, RenderScale.normalized(it))
+        }
+
+        val duringResize = manager.schedulerStats()
+        assertTrue(duringResize.queued <= 8)
+        assertTrue(duringResize.pendingConsumers <= 3)
+        assertEquals(generation, (manager.state as PreviewState.Ready).document.generationId)
+
+        releaseResponsiveRender.countDown()
+        val finalScale = RenderScale.normalized(1.5)
+        val final = awaitState(manager) {
+            it is PreviewState.Ready &&
+                it.document.scale == finalScale &&
+                it.document.pageState(0) is
+                dev.aetex.preview.domain.PagePreviewState.Ready
+        } as PreviewState.Ready
+
+        assertEquals(generation, final.document.generationId)
+        assertEquals(finalScale, final.document.scale)
+    }
+
+    @Test
     fun `request sequence orders equal-clock terminal results`() {
         val root = temporaryDirectory.resolve("project")
         val manager = manager(root) {

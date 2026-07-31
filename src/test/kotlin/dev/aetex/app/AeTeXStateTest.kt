@@ -239,6 +239,22 @@ class AeTeXStateTest {
     }
 
     @Test
+    fun `opening configured project selects its confirmed main document`() {
+        val root = temporaryDirectory.resolve("configured-open").createDirectory()
+        val main = root.resolve("main.tex")
+        main.writeText("\\documentclass{article}\n")
+        root.resolve(".aetex").createDirectory()
+            .resolve("project.toml")
+            .writeText("schema = 1\nmain = \"main.tex\"\n")
+        val state = AeTeXState()
+
+        assertTrue(state.openProject(root))
+
+        assertEquals(main.toRealPath(), state.activeDocumentPath)
+        assertEquals(main.toRealPath(), state.openDocuments.single().path)
+    }
+
+    @Test
     fun `late project operation cannot replace a newer project`() {
         val first = temporaryDirectory.resolve("first").createDirectory()
         val second = temporaryDirectory.resolve("second").createDirectory()

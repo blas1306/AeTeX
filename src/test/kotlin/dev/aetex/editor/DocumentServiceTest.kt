@@ -48,6 +48,20 @@ class DocumentServiceTest {
     }
 
     @Test
+    fun `saving preserves exact Unicode and newline bytes supplied by editor`() {
+        val file = temporaryDirectory.resolve("exact.tex")
+        Files.writeString(file, "before", StandardCharsets.UTF_8)
+        val service = DocumentService(temporaryDirectory)
+        val opened = assertIs<DocumentResult.Success<OpenDocument>>(service.open(file)).value
+        val exact = "α😀 \\section{Título}\r\nsecond\ntrailing\r\n"
+
+        assertIs<DocumentResult.Success<OpenDocument>>(service.save(opened.withContent(exact)))
+
+        assertEquals(exact, Files.readString(file, StandardCharsets.UTF_8))
+        assertTrue(Files.readAllBytes(file).contentEquals(exact.toByteArray(StandardCharsets.UTF_8)))
+    }
+
+    @Test
     fun `rejects directories and paths outside the project`() {
         val nestedDirectory = temporaryDirectory.resolve("folder").createDirectory()
         val outsideDirectory = Files.createTempDirectory("aetex-outside-")

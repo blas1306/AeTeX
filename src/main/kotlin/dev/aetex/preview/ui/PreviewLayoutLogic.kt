@@ -44,10 +44,15 @@ object PreviewLayoutLogic {
         RenderScale.normalized(current.value + steps * 0.25)
 
     fun safeDisplayExtent(points: Float, scale: RenderScale): Float {
+        return safeDisplayExtent(points, scale.value.toDouble())
+    }
+
+    fun safeDisplayExtent(points: Float, scale: Double): Float {
         if (!points.isFinite() || points <= 0f) return 1f
-        val extent = points * scale.value
+        if (!scale.isFinite() || scale <= 0.0) return 1f
+        val extent = points.toDouble() * scale
         return if (extent.isFinite()) {
-            extent.coerceIn(1f, MAXIMUM_LAYOUT_EXTENT)
+            extent.coerceIn(1.0, MAXIMUM_LAYOUT_EXTENT.toDouble()).toFloat()
         } else {
             MAXIMUM_LAYOUT_EXTENT
         }

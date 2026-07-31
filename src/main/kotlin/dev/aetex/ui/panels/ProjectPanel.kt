@@ -16,8 +16,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.mutableStateMapOf
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -43,109 +41,130 @@ fun ProjectPanel(
     onCreateProject: () -> Unit,
     onOpenProject: () -> Unit,
     onInitializeProject: () -> Unit,
-    onFileSelected: (Path) -> Unit
+    onFileSelected: (Path) -> Unit,
+    expandedDirectories: Map<Path, Boolean>,
+    onDirectoryExpandedChanged: (Path, Boolean) -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    val expandedDirectories = remember(project?.rootDirectory) {
-        mutableStateMapOf<Path, Boolean>()
-    }
     val visibleEntries = project?.let {
         flattenEntries(it.entries, expandedDirectories)
     }.orEmpty()
 
     Column(
-        modifier = Modifier
-            .width(260.dp)
+        modifier = modifier
             .fillMaxHeight()
             .background(Color(0xFF202225))
-            .padding(12.dp)
     ) {
-        Button(onClick = onCreateProject, modifier = Modifier.fillMaxWidth()) {
-            Text("New Project...")
-        }
-        Spacer(modifier = Modifier.height(8.dp))
-        Button(onClick = onOpenProject, modifier = Modifier.fillMaxWidth()) {
-            Text("Open Project...")
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Text(
-            text = project?.rootDirectory?.fileName?.toString() ?: "No project open",
-            color = Color.White,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        when (val kind = project?.directoryKind) {
-            is OpenedDirectoryKind.Unconfigured -> {
-                Text(
-                    text = "This folder is not an AeTeX project.\n" +
-                        "An AeTeX project requires .aetex/project.toml.",
-                    color = Color(0xFFFFD580),
-                    modifier = Modifier.padding(vertical = 8.dp)
-                )
-                Button(
-                    onClick = onInitializeProject,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Initialize Project")
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-            }
-
-            is OpenedDirectoryKind.InvalidProject -> {
-                Text(
-                    text = buildString {
-                        append("Invalid AeTeX project configuration:\n")
-                        append(kind.configurationPath)
-                        kind.diagnostics.firstOrNull()?.let {
-                            append("\n")
-                            append(it.message)
-                            if (it.line != null) {
-                                append(" (line ${it.line}")
-                                it.column?.let { column -> append(", column $column") }
-                                append(')')
-                            }
-                        }
-                    },
-                    color = Color(0xFFFF9B9B),
-                    modifier = Modifier.padding(vertical = 8.dp)
-                )
-            }
-
-            is OpenedDirectoryKind.Configured, null -> Unit
-        }
-
-        if (project != null && visibleEntries.isEmpty()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0xFF2D2D30))
+                .padding(start = 12.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             Text(
-                text = "This project folder is empty.",
-                color = Color(0xFFB7B7B7),
-                modifier = Modifier.padding(vertical = 8.dp)
+                text = "Project",
+                color = Color.White,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(vertical = 13.dp)
             )
-        } else {
-            LazyColumn(modifier = Modifier.fillMaxHeight()) {
-                items(
-                    items = visibleEntries,
-                    key = { it.entry.path.toString() }
-                ) { visible ->
-                    ProjectEntryRow(
-                        visibleEntry = visible,
-                        expanded = expandedDirectories[visible.entry.path] == true,
-                        selected = activeDocumentPath == visible.entry.path,
-                        onClick = {
-                            when (val entry = visible.entry) {
-                                is ProjectDirectory -> {
-                                    expandedDirectories[entry.path] =
-                                        expandedDirectories[entry.path] != true
-                                }
+        }
 
-                                is ProjectFile -> onFileSelected(entry.path)
-                            }
-                        }
+        Column(
+            modifier = Modifier
+                .fillMaxHeight()
+                .padding(12.dp)
+        ) {
+            Button(onClick = onCreateProject, modifier = Modifier.fillMaxWidth()) {
+                Text("New Project...")
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(onClick = onOpenProject, modifier = Modifier.fillMaxWidth()) {
+                Text("Open Project...")
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Text(
+                text = project?.rootDirectory?.fileName?.toString() ?: "No project open",
+                color = Color.White,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            when (val kind = project?.directoryKind) {
+                is OpenedDirectoryKind.Unconfigured -> {
+                    Text(
+                        text = "This folder is not an AeTeX project.\n" +
+                            "An AeTeX project requires .aetex/project.toml.",
+                        color = Color(0xFFFFD580),
+                        modifier = Modifier.padding(vertical = 8.dp)
                     )
+                    Button(
+                        onClick = onInitializeProject,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Initialize Project")
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+
+                is OpenedDirectoryKind.InvalidProject -> {
+                    Text(
+                        text = buildString {
+                            append("Invalid AeTeX project configuration:\n")
+                            append(kind.configurationPath)
+                            kind.diagnostics.firstOrNull()?.let {
+                                append("\n")
+                                append(it.message)
+                                if (it.line != null) {
+                                    append(" (line ${it.line}")
+                                    it.column?.let { column -> append(", column $column") }
+                                    append(')')
+                                }
+                            }
+                        },
+                        color = Color(0xFFFF9B9B),
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    )
+                }
+
+                is OpenedDirectoryKind.Configured, null -> Unit
+            }
+
+            if (project != null && visibleEntries.isEmpty()) {
+                Text(
+                    text = "This project folder is empty.",
+                    color = Color(0xFFB7B7B7),
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+            } else {
+                LazyColumn(modifier = Modifier.fillMaxHeight()) {
+                    items(
+                        items = visibleEntries,
+                        key = { it.entry.path.toString() }
+                    ) { visible ->
+                        ProjectEntryRow(
+                            visibleEntry = visible,
+                            expanded = expandedDirectories[visible.entry.path] == true,
+                            selected = activeDocumentPath == visible.entry.path,
+                            onClick = {
+                                when (val entry = visible.entry) {
+                                    is ProjectDirectory -> {
+                                        onDirectoryExpandedChanged(
+                                            entry.path,
+                                            expandedDirectories[entry.path] != true
+                                        )
+                                    }
+
+                                    is ProjectFile -> onFileSelected(entry.path)
+                                }
+                            }
+                        )
+                    }
                 }
             }
         }

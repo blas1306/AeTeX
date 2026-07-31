@@ -19,8 +19,9 @@ The study and benchmark remain engineering evidence, but this document takes
 precedence wherever their provisional recommendations differ from this
 decision.
 
-This document does not implement preview or change the benchmark. The current
-repository still contains only a placeholder preview panel.
+The repository implements this preview architecture. Workspace presentation
+and responsive logical zoom are specified further by
+[Architecture 005](005-workspace-layout.md).
 
 ## 2. Context and Objectives
 
@@ -355,11 +356,12 @@ A render request contains:
 - priority class;
 - cancellation handle.
 
-`RenderScale` captures the final raster scale after logical zoom and display
-density are combined. It determines exact output pixel dimensions under fixed
-page geometry and initial rendering flags. Later variable crop, rotation,
-background, color, or quality settings must become part of `RenderScale` or
-extend `RenderKey`; they may never vary outside the cache key.
+`RenderScale` captures the final raster scale after logical zoom, display
+density, and the fixed quality policy are combined. It determines exact output
+pixel dimensions under fixed page geometry and initial rendering flags. Later
+variable crop, rotation, background, color, or quality settings must become
+part of `RenderScale` or extend `RenderKey`; they may never vary outside the
+cache key.
 
 ### 6.4 Rendered Page
 
@@ -540,15 +542,55 @@ Neighbor requests:
 
 ### 9.4 Zoom and HiDPI
 
+Three scales remain distinct:
+
+- **logical zoom** is dp per PDF point. Fit Width divides available content
+  width by displayed page width; Fit Page takes the smaller width and height
+  ratios; Fixed supplies the selected logical value;
+- **display scale** is physical display pixels per PDF point, computed as
+  `logical zoom × LocalDensity.density`; and
+- **raster scale** is bitmap pixels per PDF point passed to PDFBox, computed as
+  `display scale × 1.5` and normalized upward to the next 0.25 cache bucket.
+
+The 1.5 quality oversampling factor is an explicit `PreviewRasterQualityPolicy`,
+not a platform conditional. It supplies sampling headroom for PDFBox text and
+lets Compose make one controlled downsampling pass. The factor is constrained
+to 1.0–2.0 and the resulting `RenderScale` remains within the existing
+0.5–4.0 range. The scheduler additionally rejects rasters over 8192 pixels on
+either axis or 32 million pixels. Extreme zoom/density combinations therefore
+receive less effective oversampling rather than unbounded allocation.
+
+Upward normalization prevents the cache bucket from selecting a bitmap below
+the quality target. Values in the same 0.25 bucket still share the exact
+`(generation, page, RenderScale)` key, avoiding nearly identical floating-point
+render requests during fractional scaling or divider movement.
+
 Logical zoom and display density produce an effective raster scale. During
 continuous zoom or resize, Compose may temporarily display the nearest cached
 scale, clearly treated as a refinement state. Once interaction settles,
 `PreviewManager` requests the normalized final scale.
 
+The logical modes are Fit Width, Fit Page, and Fixed. Fit calculations use
+the measured Preview content viewport and displayed page geometry, including
+rotation; Fixed remains independent of viewport size. The exact logical fit
+scale is distinct from the density-adjusted normalized `RenderScale` used by
+the scheduler and cache. Architecture 005 defines the formulas, padding,
+default, controls, and session persistence policy.
+
 A monitor-density change invalidates the fitness of old scales, not their
-generation. Existing images may remain temporary fallbacks while higher-quality
-visible pages render. Maximum width, height, and pixel area apply before any
-allocation.
+generation. `LocalDensity` covers normal DPI, fractional desktop/Wayland
+scaling, and Retina without platform probes. Existing images may remain
+temporary fallbacks while higher-quality visible pages render. Maximum width,
+height, pixel area, and cache reservations apply before allocation.
+
+PDFBox receives the normalized raster scale through
+`PDFRenderer.renderImage(pageIndex, rasterScale, ImageType.RGB)`. The adapter
+copies it into an immutable opaque RGB888 raster. At the Compose boundary that
+storage is copied once into an opaque BGRA8888 Skia bitmap; transparency is not
+invented and the page container remains white. Compose uses aspect-preserving
+`ContentScale.Fit` and high-quality filtering, making one controlled reduction
+from the oversampled image to the logical page box instead of stretching with
+default interpolation.
 
 ## 10. Page Cache
 
@@ -598,6 +640,13 @@ Replacement is **priority-aware, byte-weighted LRU**:
 
 Soft/weak references are not the primary policy because garbage collection does
 not provide predictable limits or account reliably for native/UI memory.
+
+The current cache budget is 192 MiB. Each entry accounts for retained RGB
+bytes, the estimated four-byte-per-pixel Compose copy, and object overhead.
+The scheduler reserves estimated render-plus-upload bytes before PDFBox runs.
+It uses two workers and a 64-job queue by default. Quality changes modify only
+normalized scale keys: they do not relax these bounds, create a generation,
+recreate `PreviewManager`, or request compilation.
 
 ### 10.4 Invalidation
 

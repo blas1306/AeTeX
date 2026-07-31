@@ -1,6 +1,7 @@
 package dev.aetex.compilation
 
 import dev.aetex.preview.successfulBuildResult
+import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Instant
 import kotlin.test.Test
@@ -60,6 +61,71 @@ class BuildResultSummaryTest {
         assertEquals("Build succeeded: build/main.pdf.", result.userSummary())
     }
 
+    @Test
+    fun `real TeX error replaces generic latexmk epilogue in typed summary`() {
+        val result = failedWithOutput(
+            stderr = "chapters/cap1.tex:37: Undefined control sequence.\n" +
+                "l.37 Text \\doesNotExist\n" +
+                "Latexmk: Sometimes, the -f option can be used to get latexmk to try to force complete processing.\n",
+            projectFiles = listOf("main.tex", "chapters/cap1.tex")
+        )
+
+        val summary = result.summary()
+
+        assertEquals(BuildSummaryCategory.ACTIONABLE_TEX_ERROR, summary.category)
+        assertEquals("chapters/cap1.tex", summary.reportedPath)
+        assertEquals(37, summary.line)
+        assertEquals(result.plan.workingDirectory.resolve("chapters/cap1.tex").toRealPath(), summary.sourcePath)
+        assertTrue(summary.text.contains("chapters/cap1.tex:37: Undefined control sequence"))
+        assertTrue(summary.text.contains("l.37 Text \\doesNotExist"))
+        assertTrue(!summary.text.contains("Sometimes, the -f option"))
+    }
+
+    @Test
+    fun `stdout only fatal error outranks earlier warnings`() {
+        val result = failedWithOutput(
+            stdout = "LaTeX Warning: Citation undefined.\n! Emergency stop.\nl.123 \\bad\n",
+            projectFiles = listOf("main.tex")
+        )
+
+        val summary = result.summary()
+
+        assertEquals(BuildSummaryCategory.ACTIONABLE_TEX_ERROR, summary.category)
+        assertEquals(123, summary.line)
+        assertTrue(summary.text.contains("Emergency stop"))
+        assertTrue(!summary.text.contains("Citation undefined"))
+    }
+
+    @Test
+    fun `malformed output uses bounded stderr fallback`() {
+        val result = failedWithOutput(
+            stderr = (1..30).joinToString("\n") { "unrecognized output $it " + "x".repeat(80) },
+            projectFiles = listOf("main.tex")
+        )
+
+        val summary = result.summary()
+
+        assertEquals(BuildSummaryCategory.NON_ZERO_EXIT, summary.category)
+        assertTrue(summary.text.contains("latexmk exited with code 12"))
+        assertTrue(summary.text.contains("stderr:"))
+        assertTrue(summary.text.length <= 1_200)
+        assertTrue(!summary.text.contains("unrecognized output 1 "))
+    }
+
+    @Test
+    fun `actionable diagnostic fields and excerpts are bounded`() {
+        val result = failedWithOutput(
+            stderr = "main.tex:4: ${"failure ".repeat(200)}\n" + "l.4 ${"context ".repeat(200)}\n",
+            projectFiles = listOf("main.tex")
+        )
+
+        val summary = result.summary()
+
+        assertEquals(BuildSummaryCategory.ACTIONABLE_TEX_ERROR, summary.category)
+        assertTrue(summary.text.length <= 1_200)
+        assertTrue(summary.contextLine!!.length <= 300)
+    }
+
     private fun cancellation(origin: CancellationOrigin) =
         BuildCancellation(origin, Instant.parse("2026-07-30T12:00:00Z"))
 
@@ -85,4 +151,61 @@ class BuildResultSummaryTest {
         quarantine = null,
         trace = emptyMap()
     )
+
+    private fun failedWithOutput(
+        stdout: String = "",
+        stderr: String = "",
+        projectFiles: List<String>
+    ): BuildResult {
+        val root = temporaryDirectory.resolve("project-${System.nanoTime()}")
+        Files.createDirectories(root)
+        projectFiles.forEach { relative ->
+            val file = root.resolve(relative)
+            Files.createDirectories(file.parent)
+            Files.writeString(file, "% fixture")
+        }
+        val base = successfulBuildResult(root, "summary-${System.nanoTime()}")
+        val log = FileBuildLogFactory(temporaryDirectory.resolve("logs-${System.nanoTime()}"))
+            .create(base.sessionId, base.createdAt)
+        if (stdout.isNotEmpty()) {
+            log.append(
+                BuildLogOrigin.STDOUT,
+                stdout.toByteArray(),
+                stdout,
+                DecodingStatus.COMPLETE
+            )
+        }
+        if (stderr.isNotEmpty()) {
+            log.append(
+                BuildLogOrigin.STDERR,
+                stderr.toByteArray(),
+                stderr,
+                DecodingStatus.COMPLETE
+            )
+        }
+        val handle = log.snapshot()
+        val diagnostics = BasicLatexDiagnosticExtractor().extract(
+            base.sessionId,
+            root,
+            handle.readEvents()
+        )
+        log.close()
+        return BuildResult(
+            sessionId = base.sessionId,
+            state = BuildState.FAILED,
+            plan = base.plan,
+            failure = BuildFailure(BuildFailureKind.NON_ZERO_EXIT, "latexmk exited unsuccessfully."),
+            createdAt = base.createdAt,
+            startedAt = base.startedAt,
+            finishedAt = base.finishedAt,
+            processEvidence = base.processEvidence.copy(exitCode = 12),
+            cancellation = null,
+            logs = handle,
+            diagnostics = diagnostics,
+            artifacts = base.artifacts,
+            missingRequiredArtifacts = emptyList(),
+            quarantine = null,
+            trace = emptyMap()
+        )
+    }
 }

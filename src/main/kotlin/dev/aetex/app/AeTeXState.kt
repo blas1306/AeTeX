@@ -41,6 +41,12 @@ import dev.aetex.preview.domain.PreviewError
 import dev.aetex.preview.domain.PreviewErrorKind
 import dev.aetex.preview.domain.PreviewState
 import dev.aetex.preview.domain.RenderScale
+import dev.aetex.workspace.ResolvedWorkspaceLayout
+import dev.aetex.workspace.WorkspaceLayout
+import dev.aetex.workspace.WorkspacePanel
+import dev.aetex.workspace.WorkspacePreferencesCoordinator
+import dev.aetex.workspace.WorkspaceTool
+import dev.aetex.workspace.transientWorkspacePreferencesCoordinator
 import java.nio.file.Path
 import java.util.Collections
 import java.util.concurrent.CompletableFuture
@@ -77,7 +83,9 @@ class AeTeXState(
     private val documentServiceFactory: (Path) -> DocumentService = ::DocumentService,
     private val compilationManagerFactory: () -> CompilationManager = ::CompilationManager,
     private val previewManagerFactory: (CompilationManager, Path) -> PreviewManager =
-        { manager, root -> PreviewManager(manager, root) }
+        { manager, root -> PreviewManager(manager, root) },
+    private val workspacePreferences: WorkspacePreferencesCoordinator =
+        transientWorkspacePreferencesCoordinator()
 ) {
     var project: TeXProject? by mutableStateOf(null)
         private set
@@ -115,6 +123,11 @@ class AeTeXState(
     private var currentProjectOperation = 0L
 
     var previewState: PreviewState by mutableStateOf(PreviewState.Empty)
+        private set
+
+    var workspaceLayout: WorkspaceLayout by mutableStateOf(
+        workspacePreferences.initialLayout
+    )
         private set
 
     val activeDocument: OpenDocument?
@@ -173,7 +186,10 @@ class AeTeXState(
     fun prepareOpenProject(rootDirectory: Path): ProjectTransitionPreparation =
         try {
             val loadResult = projectLoader.load(rootDirectory)
-            ProjectTransitionPreparation.Ready(loadResult)
+            ProjectTransitionPreparation.Ready(
+                loadResult = loadResult,
+                initialDocument = loadResult.project.mainDocument
+            )
         } catch (error: ProjectScanException) {
             ProjectTransitionPreparation.Failed(error.userMessage, error)
         } catch (error: Exception) {
@@ -448,7 +464,43 @@ class AeTeXState(
         previewManager?.retryPage(pageIndex)
     }
 
+    fun resolvedWorkspaceLayout(availableWidthDp: Double): ResolvedWorkspaceLayout =
+        workspaceLayout.resolve(availableWidthDp)
+
+    fun dragWorkspaceDivider(
+        panel: WorkspacePanel,
+        horizontalDeltaDp: Double,
+        availableWidthDp: Double
+    ) {
+        updateWorkspaceLayout(
+            workspaceLayout.dragDivider(panel, horizontalDeltaDp, availableWidthDp)
+        )
+    }
+
+    fun collapseWorkspacePanel(panel: WorkspacePanel) {
+        updateWorkspaceLayout(workspaceLayout.collapse(panel))
+    }
+
+    fun restoreWorkspacePanel(panel: WorkspacePanel, availableWidthDp: Double) {
+        updateWorkspaceLayout(workspaceLayout.restore(panel, availableWidthDp))
+    }
+
+    fun activateWorkspaceTool(tool: WorkspaceTool, availableWidthDp: Double) {
+        updateWorkspaceLayout(workspaceLayout.toggleTool(tool, availableWidthDp))
+    }
+
+    fun flushWorkspaceLayout(): Boolean =
+        workspacePreferences.flush(workspaceLayout)
+
+    private fun updateWorkspaceLayout(layout: WorkspaceLayout) {
+        val normalized = layout.normalized()
+        if (normalized == workspaceLayout) return
+        workspaceLayout = normalized
+        workspacePreferences.requestSave(normalized)
+    }
+
     fun shutdown() {
+        workspacePreferences.close(workspaceLayout)
         val preview = synchronized(previewStateLock) {
             val current = previewManager
             previewManager = null
