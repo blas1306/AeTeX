@@ -44,3 +44,12 @@ bin/
 
 ### Mac OS ###
 .DS_Store
+
+# LaTeX build artifacts
+*.aux
+*.log
+*.fls
+*.fdb_latexmk
+*.out
+*.toc
+*.synctex.gz
