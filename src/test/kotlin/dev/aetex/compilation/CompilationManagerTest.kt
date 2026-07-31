@@ -364,7 +364,7 @@ class CompilationManagerTest {
     fun `changed TeX log is retained as attributed raw evidence and diagnostics`() {
         val plan = createPlan(temporaryDirectory.resolve("tool-log"))
         val launcher = ProcessLauncher {
-            Files.writeString(plan.primaryPdf, "pdf")
+            Files.writeString(plan.primaryPdf, "%PDF-1.4\n")
             Files.writeString(
                 plan.invocation.outputDirectory.resolve("main.log"),
                 "! Undefined control sequence\n"
@@ -494,7 +494,7 @@ class CompilationManagerTest {
         val root = temporaryDirectory.resolve(name)
         Files.createDirectories(root.resolve("build"))
         Files.writeString(root.resolve("main.tex"), "\\documentclass{article}")
-        Files.writeString(root.resolve("build").resolve("main.pdf"), "pdf")
+        Files.writeString(root.resolve("build").resolve("main.pdf"), "%PDF-1.4\n")
         return createPlan(root)
     }
 

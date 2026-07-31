@@ -208,6 +208,52 @@ class ProjectConfigurationLoaderTest {
     }
 
     @Test
+    fun `canonical serializer round trips every supported field`() {
+        val expected = ProjectConfiguration(
+            schema = CURRENT_PROJECT_CONFIGURATION_SCHEMA,
+            main = Path.of("src", "main.tex"),
+            engine = TeXEngine.LUA_LATEX,
+            strategy = CompilationStrategy.LATEXMK,
+            output = Path.of("generated", "pdf")
+        )
+        val serialized = ProjectConfigurationSerializer().serialize(expected)
+        writeConfiguration(serialized)
+
+        val actual = assertIs<ProjectConfigurationLoadResult.Loaded>(
+            loader.load(temporaryDirectory)
+        ).configuration
+
+        assertEquals(expected, actual)
+        assertTrue(serialized.endsWith("\n"))
+        assertEquals(
+            """
+            schema = 1
+            main = "src/main.tex"
+            engine = "lualatex"
+            strategy = "latexmk"
+            output = "generated/pdf"
+            """.trimIndent() + "\n",
+            serialized
+        )
+    }
+
+    @Test
+    fun `serializer refuses to discard unknown fields`() {
+        val configuration = ProjectConfiguration(
+            schema = CURRENT_PROJECT_CONFIGURATION_SCHEMA,
+            main = Path.of("main.tex"),
+            engine = null,
+            strategy = null,
+            output = null,
+            unknownFields = mapOf("future" to "value")
+        )
+
+        kotlin.test.assertFailsWith<IllegalArgumentException> {
+            ProjectConfigurationSerializer().serialize(configuration)
+        }
+    }
+
+    @Test
     fun `validates relative main paths`() {
         writeConfiguration("schema = 1\nmain = \"chapters/main.tex\"")
         val valid = assertIs<ProjectConfigurationLoadResult.Loaded>(

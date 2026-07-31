@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import dev.aetex.project.ProjectDirectory
 import dev.aetex.project.ProjectEntry
 import dev.aetex.project.ProjectFile
+import dev.aetex.project.OpenedDirectoryKind
 import dev.aetex.project.TeXProject
 import java.nio.file.Path
 
@@ -39,7 +40,9 @@ private data class VisibleProjectEntry(
 fun ProjectPanel(
     project: TeXProject?,
     activeDocumentPath: Path?,
+    onCreateProject: () -> Unit,
     onOpenProject: () -> Unit,
+    onInitializeProject: () -> Unit,
     onFileSelected: (Path) -> Unit
 ) {
     val expandedDirectories = remember(project?.rootDirectory) {
@@ -56,11 +59,12 @@ fun ProjectPanel(
             .background(Color(0xFF202225))
             .padding(12.dp)
     ) {
-        Button(
-            onClick = onOpenProject,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text("Open Project")
+        Button(onClick = onCreateProject, modifier = Modifier.fillMaxWidth()) {
+            Text("New Project...")
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Button(onClick = onOpenProject, modifier = Modifier.fillMaxWidth()) {
+            Text("Open Project...")
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -74,6 +78,46 @@ fun ProjectPanel(
         )
 
         Spacer(modifier = Modifier.height(8.dp))
+
+        when (val kind = project?.directoryKind) {
+            is OpenedDirectoryKind.Unconfigured -> {
+                Text(
+                    text = "This folder is not an AeTeX project.\n" +
+                        "An AeTeX project requires .aetex/project.toml.",
+                    color = Color(0xFFFFD580),
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+                Button(
+                    onClick = onInitializeProject,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Initialize Project")
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
+            is OpenedDirectoryKind.InvalidProject -> {
+                Text(
+                    text = buildString {
+                        append("Invalid AeTeX project configuration:\n")
+                        append(kind.configurationPath)
+                        kind.diagnostics.firstOrNull()?.let {
+                            append("\n")
+                            append(it.message)
+                            if (it.line != null) {
+                                append(" (line ${it.line}")
+                                it.column?.let { column -> append(", column $column") }
+                                append(')')
+                            }
+                        }
+                    },
+                    color = Color(0xFFFF9B9B),
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+            }
+
+            is OpenedDirectoryKind.Configured, null -> Unit
+        }
 
         if (project != null && visibleEntries.isEmpty()) {
             Text(

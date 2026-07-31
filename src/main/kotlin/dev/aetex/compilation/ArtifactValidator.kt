@@ -4,6 +4,7 @@ import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.nio.file.attribute.BasicFileAttributes
+import java.util.Arrays
 
 class ArtifactValidator {
     fun validate(
@@ -47,6 +48,18 @@ class ArtifactValidator {
                 BasicFileAttributes::class.java,
                 LinkOption.NOFOLLOW_LINKS
             )
+            if (
+                expected.role == ArtifactRole.PRIMARY_PDF &&
+                !hasPdfHeader(real)
+            ) {
+                return ArtifactObservation(
+                    expected = expected,
+                    status = ArtifactStatus.INVALID,
+                    size = attributes.size(),
+                    lastModified = attributes.lastModifiedTime().toInstant(),
+                    technicalDetail = "The file does not start with a PDF header."
+                )
+            }
             val status = when {
                 previous?.exists != true -> ArtifactStatus.CREATED
                 previous.fileKey != attributes.fileKey()?.toString() ||
@@ -67,5 +80,20 @@ class ArtifactValidator {
         } catch (error: SecurityException) {
             ArtifactObservation(expected, ArtifactStatus.INVALID, technicalDetail = error.message)
         }
+    }
+
+    private fun hasPdfHeader(path: java.nio.file.Path): Boolean =
+        try {
+            Files.newInputStream(path).use { input ->
+                Arrays.equals(input.readNBytes(PDF_HEADER.size), PDF_HEADER)
+            }
+        } catch (_: IOException) {
+            false
+        } catch (_: SecurityException) {
+            false
+        }
+
+    private companion object {
+        val PDF_HEADER = "%PDF-".toByteArray(Charsets.US_ASCII)
     }
 }

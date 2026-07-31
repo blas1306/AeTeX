@@ -369,11 +369,21 @@ class CompilationManager(
                 (it.status == ArtifactStatus.MISSING || it.status == ArtifactStatus.INVALID)
         }
         val artifactFailure = invalidRequired.firstOrNull()?.let {
-            BuildFailure(
-                BuildFailureKind.EXPECTED_ARTIFACT_MISSING,
-                "The required artifact is missing or invalid: ${it.expected.path}",
-                relatedPath = it.expected.path
-            )
+            when (it.status) {
+                ArtifactStatus.MISSING -> BuildFailure(
+                    BuildFailureKind.EXPECTED_ARTIFACT_MISSING,
+                    "The required artifact was not produced: ${it.expected.path}",
+                    relatedPath = it.expected.path
+                )
+
+                ArtifactStatus.INVALID -> BuildFailure(
+                    BuildFailureKind.EXPECTED_ARTIFACT_INVALID,
+                    "The required artifact is invalid: ${it.expected.path}",
+                    relatedPath = it.expected.path
+                )
+
+                else -> null
+            }
         }
         var failure = outcome.failure ?: attributedLogFailure ?: artifactFailure ?: session.log.storageFailure
         var quarantine: QuarantineRecord? = null
@@ -407,7 +417,8 @@ class CompilationManager(
             outcome.evidence.cleanupProven &&
             failure?.kind in setOf(
                 BuildFailureKind.NON_ZERO_EXIT,
-                BuildFailureKind.EXPECTED_ARTIFACT_MISSING
+                BuildFailureKind.EXPECTED_ARTIFACT_MISSING,
+                BuildFailureKind.EXPECTED_ARTIFACT_INVALID
             )
         ) {
             failure = null
@@ -643,7 +654,9 @@ class CompilationManager(
                         BuildFailureKind.LOG_STORAGE_FAILURE -> DiagnosticKind.LOG_STORAGE
                         BuildFailureKind.CANCELLATION_FAILURE,
                         BuildFailureKind.POSSIBLY_ORPHANED_PROCESS -> DiagnosticKind.CLEANUP
-                        BuildFailureKind.EXPECTED_ARTIFACT_MISSING -> DiagnosticKind.ARTIFACT
+                        BuildFailureKind.PROCESS_START_FAILURE -> DiagnosticKind.PROCESS_START
+                        BuildFailureKind.EXPECTED_ARTIFACT_MISSING,
+                        BuildFailureKind.EXPECTED_ARTIFACT_INVALID -> DiagnosticKind.ARTIFACT
                         else -> DiagnosticKind.PROCESS_EXIT
                     },
                     severity = DiagnosticSeverity.ERROR,

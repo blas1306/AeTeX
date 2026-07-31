@@ -22,7 +22,7 @@ class PathAndArtifactTest {
         val root = temporaryDirectory.resolve("project")
         Files.createDirectories(root.resolve("build"))
         Files.writeString(root.resolve("main.tex"), "\\documentclass{article}")
-        Files.writeString(root.resolve("build").resolve("main.pdf"), "pdf")
+        Files.writeString(root.resolve("build").resolve("main.pdf"), "%PDF-1.4\n")
         val plan = createPlan(root)
         Files.writeString(plan.invocation.mainDocument, "\\documentclass{book}\nchanged")
         manager().use { manager ->
@@ -130,7 +130,7 @@ class PathAndArtifactTest {
         var starts = 0
         override fun start(plan: BuildPlan): ManagedProcess {
             starts += 1
-            if (createPdf) Files.writeString(plan.primaryPdf, "pdf")
+            if (createPdf) Files.writeString(plan.primaryPdf, "%PDF-1.4\n")
             return object : ManagedProcess {
                 override val stdout = ByteArrayInputStream(byteArrayOf())
                 override val stderr = ByteArrayInputStream(byteArrayOf())

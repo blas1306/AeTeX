@@ -265,7 +265,6 @@ class BuildPlanner(
         "-halt-on-error",
         "-file-line-error",
         "-outdir=${output}",
-        "--",
         main.toString()
     )
 

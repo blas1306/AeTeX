@@ -41,7 +41,8 @@ class ProjectLoader(
                         ProjectConfigurationDiagnostic(
                             code = ProjectConfigurationDiagnosticCode.CONFIGURATION_ABSENT,
                             severity = ProjectConfigurationDiagnosticSeverity.WARNING,
-                            message = "This project has no .aetex/project.toml configuration.",
+                            message = "This folder is not an AeTeX project. " +
+                                "An AeTeX project requires .aetex/project.toml.",
                             configurationPath = configurationResult.configurationPath
                         )
                     )
@@ -220,6 +221,22 @@ fun chooseProjectDirectory(): Path? {
     val chooser = JFileChooser().apply {
         fileSelectionMode = JFileChooser.DIRECTORIES_ONLY
         dialogTitle = "Open LaTeX project"
+    }
+
+    return if (chooser.showOpenDialog(null) == JFileChooser.APPROVE_OPTION) {
+        chooser.selectedFile.toPath()
+    } else {
+        null
+    }
+}
+
+fun chooseProjectParentDirectory(initialDirectory: Path? = null): Path? {
+    val chooser = JFileChooser().apply {
+        fileSelectionMode = JFileChooser.DIRECTORIES_ONLY
+        dialogTitle = "Choose project location"
+        initialDirectory?.toFile()?.takeIf { it.isDirectory }?.let {
+            currentDirectory = it
+        }
     }
 
     return if (chooser.showOpenDialog(null) == JFileChooser.APPROVE_OPTION) {

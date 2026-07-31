@@ -16,9 +16,9 @@ promotes the accepted direction from
 implementation contract. The study remains as historical analysis, but this
 document takes precedence wherever the two differ.
 
-The contract describes behavior that is not implemented in the current
-repository. The implemented baseline remains the directory, scanner, and
-document model described by
+The schema, canonical loader and validator, effective configuration, canonical
+new-file writer, and IDE project-provisioning workflows are implemented. The
+directory, scanner, and document foundation remains described by
 [Architecture 001](001-project-model.md).
 
 ## 2. Motivation
@@ -126,7 +126,8 @@ The reserved shape is:
 
 Only `project.toml` belongs to the current configuration system.
 `workspace.toml` and `cache/` are reservations, not current files or contracts.
-The current code does not yet create or read any of them.
+Project creation and initialization create `project.toml`; the current code
+does not create or read the reserved entries.
 
 AeTeX discovers configuration only at this exact path. It does not search parent
 directories, merge nested `.aetex` directories, or import another tool's
@@ -438,6 +439,54 @@ output = "build"
 - `strategy = "latexmk"` selects the supported compilation coordinator.
 - `output = "build"` places generated artifacts under the project's `build`
   directory.
+
+## 17. IDE creation and initialization
+
+The IDE uses this schema as its only persistent project identity. It does not
+create a workspace marker, recent-project metadata inside the project, or a
+hidden build-enablement flag.
+
+`New Project...` accepts a project name and parent directory. The destination
+may be absent or an existing empty ordinary directory. Existing files,
+symbolic links, and non-empty directories are collisions. A successful
+creation writes:
+
+```text
+<project>/
+    .aetex/project.toml
+    src/main.tex
+```
+
+The generated configuration is the minimal self-contained schema 1 file:
+
+```toml
+schema = 1
+main = "src/main.tex"
+```
+
+Engine, strategy, and output retain the schema 1 effective rules in section 11.
+The generated LaTeX document contains an active `\documentclass`, a document
+environment, and valid text.
+
+An ordinary opened directory is explicitly unconfigured and offers
+`Initialize Project`. Before writing, the IDE lists every path it will create.
+If main-document detection identifies one compatible document unambiguously,
+initialization records that document without altering it. Otherwise it creates
+`src/main.tex` only when that exact path is free. It never overwrites an
+existing `project.toml`, source file, or unrelated entry.
+
+Creation and initialization write the configuration last, validate the result,
+and reopen it through the canonical `ProjectLoader`. Failure removes only files
+and empty directories created by that operation. Configuration publication
+uses a complete sibling temporary file followed by a non-replacing move;
+temporary files are removed after success or failure.
+
+An existing loaded schema 1 configuration is `AlreadyConfigured`.
+An existing malformed, semantically invalid, or unsupported configuration is a
+typed conflict and remains byte-for-byte untouched. Build is eligible only
+when the loader produces a loaded configuration and a ready effective
+configuration with a confirmed main document. The origin of the file—IDE, CLI,
+script, or manual editing—has no effect on eligibility.
 
 The blank lines are optional TOML formatting. The example is fully explicit;
 the minimal example in section 8 has the same effective strategy and output and

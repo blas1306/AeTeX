@@ -24,6 +24,7 @@ import kotlin.concurrent.thread
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
@@ -176,6 +177,36 @@ class PreviewManagerTest {
             newer.sessionId,
             (manager.state as PreviewState.Ready).document.provenance.sessionId
         )
+    }
+
+    @Test
+    fun `older cancelled replacement cannot make completed current preview stale`() {
+        val root = temporaryDirectory.resolve("project")
+        val manager = manager(root) {
+            PreviewResult.Success(testGeneration(temporaryDirectory, sessionId = it.sessionId))
+        }
+        val current = successfulBuildResult(
+            root,
+            "current",
+            Instant.parse("2026-07-30T12:00:10Z")
+        )
+        manager.acceptCompilationSnapshot(snapshotOf(current, requestSequence = 2))
+        val ready = awaitState(manager) { it is PreviewState.Ready } as PreviewState.Ready
+        val replaced = terminalBuildResult(
+            successfulBuildResult(
+                root,
+                "replaced",
+                Instant.parse("2026-07-30T12:00:00Z")
+            ),
+            BuildState.CANCELLED
+        )
+
+        manager.acceptCompilationSnapshot(snapshotOf(replaced, requestSequence = 1))
+
+        val afterCancellation = assertIs<PreviewState.Ready>(manager.state)
+        assertEquals(ready.document.generationId, afterCancellation.document.generationId)
+        assertFalse(afterCancellation.stale)
+        assertNull(afterCancellation.notice)
     }
 
     @Test

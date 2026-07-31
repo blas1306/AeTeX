@@ -33,9 +33,9 @@ The implemented baseline includes:
 
 ## Milestone 1 — Project configuration
 
-**Status:** Configuration loading, validation, effective defaults, and
-non-interactive main-document resolution implemented. Interactive confirmation
-and configuration writing remain pending.
+**Status:** Configuration loading, validation, effective defaults,
+non-interactive main-document resolution, canonical configuration writing,
+project creation, and existing-directory initialization implemented.
 
 **Objective:** Persist the minimum project intent needed to identify a build target and prepare compilation without relying on hidden heuristics.
 
@@ -70,13 +70,34 @@ TomlJ `1.1.1` is the only new runtime dependency. It is a focused TOML 1.0
 parser available from Maven Central and provides typed values plus syntax
 positions without introducing a serialization framework.
 
-Current limitations are intentional: AeTeX does not yet write configuration or
-provide the interactive confirmation/selection flow. Unknown parsed field
-values are retained in memory, but comment and formatting round-trip is not
-implemented because there is no writer in this milestone. Architecture 002 does
-not specify the base directory for `% !TEX root` paths; AeTeX follows the
-directive convention of resolving them relative to the file that declares the
-directive, then applies project-root confinement.
+The project-provisioning extension:
+
+- creates a new project in a non-existing or existing empty destination and
+  rejects files, links, and non-empty destinations;
+- generates a valid `src/main.tex`, writes the minimal schema 1 configuration,
+  reloads it through `ProjectLoader`, and opens the generated document;
+- opens externally or manually configured projects through the same loader and
+  makes Build eligible solely from the validated effective configuration;
+- classifies opened roots as configured projects, unconfigured directories, or
+  invalid projects instead of treating every failure as a missing file;
+- offers initialization only for an absent configuration, reuses a single
+  compatible detected main document, or safely creates `src/main.tex`;
+- confirms the exact paths initialization will create, preserves unrelated
+  files, refuses invalid or unsupported existing configuration, and rolls back
+  only artifacts created by a failed operation;
+- publishes create, open, and initialize results with operation identities so a
+  late result cannot replace a newer project; project scanning and provisioning
+  run away from the Compose UI thread.
+
+The canonical writer emits deterministic UTF-8 TOML ending in a newline and
+publishes it through a sibling temporary file without replacement. It is used
+only for new configuration in this milestone. Existing configurations,
+including unknown fields, comments, and formatting, are never rewritten by
+initialization. Interactive confirmation or selection of an arbitrary existing
+main document remains pending. Architecture 002 does not specify the base
+directory for `% !TEX root` paths; AeTeX follows the directive convention of
+resolving them relative to the file that declares the directive, then applies
+project-root confinement.
 
 ## Milestone 2 — Compilation
 

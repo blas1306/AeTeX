@@ -8,8 +8,29 @@ import dev.aetex.project.configuration.MainDocumentState
 import dev.aetex.project.configuration.PersistedConfigurationStatus
 import dev.aetex.project.configuration.ProjectConfiguration
 import dev.aetex.project.configuration.ProjectConfigurationDiagnostic
+import dev.aetex.project.configuration.ProjectConfigurationDiagnosticSeverity
+import dev.aetex.project.configuration.ProjectConfigurationLoader
 import dev.aetex.project.configuration.TeXEngine
 import java.nio.file.Path
+
+sealed interface OpenedDirectoryKind {
+    val configurationPath: Path
+
+    data class Configured(
+        override val configurationPath: Path,
+        val configuration: ProjectConfiguration
+    ) : OpenedDirectoryKind
+
+    data class Unconfigured(
+        override val configurationPath: Path
+    ) : OpenedDirectoryKind
+
+    data class InvalidProject(
+        override val configurationPath: Path,
+        val diagnostics: List<ProjectConfigurationDiagnostic>,
+        val unsupportedSchema: Boolean
+    ) : OpenedDirectoryKind
+}
 
 data class TeXProject(
     val rootDirectory: Path,
@@ -19,6 +40,52 @@ data class TeXProject(
         defaultUnconfiguredEffectiveConfiguration(rootDirectory),
     val configurationDiagnostics: List<ProjectConfigurationDiagnostic> = emptyList()
 ) {
+    val directoryKind: OpenedDirectoryKind
+        get() {
+            val configurationPath =
+                rootDirectory.resolve(ProjectConfigurationLoader.CONFIGURATION_RELATIVE_PATH)
+            return when (effectiveConfiguration.persistedStatus) {
+                PersistedConfigurationStatus.ABSENT ->
+                    OpenedDirectoryKind.Unconfigured(configurationPath)
+
+                PersistedConfigurationStatus.LOADED ->
+                    if (
+                        configurationDiagnostics.any {
+                            it.severity == ProjectConfigurationDiagnosticSeverity.ERROR
+                        }
+                    ) {
+                        OpenedDirectoryKind.InvalidProject(
+                            configurationPath,
+                            configurationDiagnostics,
+                            unsupportedSchema = false
+                        )
+                    } else {
+                        OpenedDirectoryKind.Configured(
+                            configurationPath,
+                            checkNotNull(persistedConfiguration)
+                        )
+                    }
+
+                PersistedConfigurationStatus.INVALID ->
+                    OpenedDirectoryKind.InvalidProject(
+                        configurationPath,
+                        configurationDiagnostics,
+                        unsupportedSchema = false
+                    )
+
+                PersistedConfigurationStatus.UNSUPPORTED_SCHEMA ->
+                    OpenedDirectoryKind.InvalidProject(
+                        configurationPath,
+                        configurationDiagnostics,
+                        unsupportedSchema = true
+                    )
+            }
+        }
+
+    val isBuildable: Boolean
+        get() = directoryKind is OpenedDirectoryKind.Configured &&
+            effectiveConfiguration.isReady
+
     val mainDocumentState: MainDocumentState
         get() = effectiveConfiguration.mainDocument
 
